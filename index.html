@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>Telegram Gift</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      background:#0a0a0a url("https://files.catbox.moe/63z7vy.png") no-repeat center center/cover;
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:20px;
+      padding:20px 0;
+      font-family:Arial,Helvetica,sans-serif;
+      justify-content:space-between;
+      color:#fff;
+    }
+    .title-bar{display:flex;align-items:center;gap:8px}
+    .title-bar img.star-icon{height:22px}
+    .title-bar .pencil-text{font-size:24px;background:linear-gradient(135deg,#fff 30%,#ccc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 2px #000);letter-spacing:1px}
+    .row{display:flex;gap:24px;flex-wrap:nowrap;overflow-x:auto;max-width:100vw;padding:0 10px}
+    .card{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+    .btn-img{background:none;border:none;cursor:pointer;width:70px;height:70px;padding:0}
+    .btn-img img{width:100%;height:100%;object-fit:cover}
+    .stars-row{display:flex;align-items:center;gap:4px}
+    .stars-row img.star{height:14px}
+    .stars-row span{color:#fff;font-size:13px;font-weight:500;margin-left:2px}
+    .ad-btn{background:linear-gradient(145deg,#2e2e2e,#1a1a1a);border:1px solid #444;color:#fff;padding:6px 12px;border-radius:8px;font-size:13px;cursor:pointer;box-shadow:2px 2px 6px #000;font-family:monospace;min-width:60px;transition:.2s}
+    .ad-btn:active{box-shadow:inset 2px 2px 4px #000}
+    .claim-btn{background:linear-gradient(90deg,#ffe161,#ffd700);border:1px solid #cead23;color:#222;font-weight:bold;font-family:monospace;padding:6px 18px;font-size:14px;border-radius:10px;margin-top:3px;margin-bottom:3px;cursor:pointer;animation:pulse 1s infinite alternate;box-shadow:0 0 8px #fff3;min-width:60px;transition:.15s}
+    @keyframes pulse{0%{box-shadow:0 0 8px #ffe161}100%{box-shadow:0 0 18px #ffe161}}
+    .video-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 15px rgba(255,255,255,0.1);transform:translateY(-10vh)}
+    .video-circle video{width:100%;height:100%;object-fit:cover}
+    .username-under-circle{margin-top:8px;font-size:16px;color:#fff;font-family:monospace;cursor:pointer;user-select:none}
+    .bottom-bar{width:0%;display:flex;justify-content:center;gap:15px;padding:10px 20;background:#0000FF;border-top:0px solid #222;margin-top:auto}
+    .bottom-bar button{background:linear-gradient(145deg,#FF0000,#1a1a1a);border:0px solid #FF0000;color:#fff;padding:10px 10px;border-radius:28px;font-size:10px;cursor:pointer;box-shadow:0px 100px 100px #FF0000;font-family:monospace;transition:0.2s}
+    .bottom-bar button:active{box-shadow:inset 2px 2px 4px #000}
+    #myGiftsFullPage,#inviteFullPage{position:fixed;inset:0;width:100vw;height:100vh;background:#181828;color:#fff;display:none;z-index:2000;flex-direction:column;align-items:center;justify-content:flex-start;animation:fadeIn .25s}
+    @keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
+    .mygifts-header,.invite-header{width:100%;padding:28px 0 10px 0;display:flex;justify-content:center;align-items:center;position:relative}
+    .mygifts-header h2,.invite-header h2{font-size:28px;margin:0;font-family:monospace;letter-spacing:1px;background:linear-gradient(135deg,#fff 30%,#ccc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 2px #000)}
+    .mygifts-close-btn,.invite-close-btn{position:absolute;right:20px;top:18px;background:none;border:none;color:#fff;font-size:26px;cursor:pointer;z-index:10}
+    .mygifts-content,.invite-content{text-align:center;padding:30px 18px 0 18px;flex:1;width:100%;display:flex;flex-direction:column;gap:20px}
+    .mygifts-list{margin-top:38px;display:flex;flex-direction:column;align-items:center;gap:22px;flex-wrap:nowrap;flex:1;min-height:0;overflow-y:auto;width:100%;padding:12px}
+    .mygifts-item{background:#222237;padding:16px 20px 14px 20px;border-radius:12px;box-shadow:2px 2px 14px #0004;min-width:90px;margin-bottom:20px;display:flex;flex-direction:column;align-items:center}
+    .mygifts-item img{width:60px;height:60px;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#111}
+    .mygifts-label{color:#fee055;font-size:16px;font-family:monospace}
+    .mygifts-date{color:#aaa;margin-top:2px;font-size:13px;font-family:monospace}
+    .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:30px;background:linear-gradient(90deg,#2a8f38,#5bd36a);color:#062207;font-weight:700;padding:12px 18px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;gap:12px;min-width:220px;justify-content:center;font-family:monospace}
+    .toast .check{font-size:18px}
+    .invite-link-box{background:#222237;padding:14px 18px;border-radius:12px;font-size:15px;font-family:monospace;color:#ffd700;word-break:break-all;box-shadow:2px 2px 14px #0004}
+    .invite-stats{display:flex;justify-content:space-around;width:100%;margin-top:20px}
+    .stat-item{background:#222237;padding:12px 20px;border-radius:12px;box-shadow:2px 2px 14px #0004;text-align:center;min-width:90px}
+    .stat-item .stat-label{color:#aaa;font-size:13px;margin-bottom:4px}
+    .stat-item .stat-value{color:#fff;font-size:18px;font-weight:700}
+    .invite-video-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 15px rgba(255,255,255,0.1);margin:10px auto}
+    .invite-video-circle video{width:100%;height:100%;object-fit:cover}
+    @media (max-width:600px){.mygifts-header h2,.invite-header h2{font-size:22px}}
+  </style>
+</head>
+<body>
+
+  <!-- العنوان -->
+  <div class="title-bar">
+    <img class="star-icon" src="https://web.duckystars.app/assets/star-GB1I2Iiq.png" alt="★" />
+    <span class="pencil-text">Telegram Gift</span>
+  </div>
+
+  <!-- صف الهدايا الأفقي -->
+  <div class="row" id="giftsRow"></div>
+
+  <!-- الفيديو الدائري + اسم المستخدم -->
+  <div style="display:flex;flex-direction:column;align-items:center;width:100%;justify-content:center;margin-top:auto;">
+    <div id="usernameUnderCircle" class="username-under-circle" title="Click to set username">@unknown</div>
+    <div class="video-circle" id="videoCircle">
+      <video autoplay muted loop playsinline>
+        <source src="https://files.catbox.moe/sy0jjn.mp4" type="video/mp4">
+      </video>
+    </div>
+  </div>
+
+  <!-- أزرار أسفل الشاشة -->
+  <div class="bottom-bar">
+    <button onclick="openMyGiftsPage()">My Gift</button>
+    <button onclick="alert('Task clicked')">Task</button>
+    <button onclick="alert('Add Task clicked')">Add Task</button>
+    <button onclick="openInvitePage()">Invite Friend</button>
+  </div>
+
+  <!-- صفحة My Gifts -->
+  <div id="myGiftsFullPage">
+    <div class="mygifts-header">
+      <h2>🎁 My Gifts</h2>
+      <button class="mygifts-close-btn" onclick="closeMyGiftsPage()">&times;</button>
+    </div>
+    <div class="mygifts-content">
+      <p>Here you can see all the gifts you collected!</p>
+      <div class="mygifts-list" id="mygiftsList"></div>
+    </div>
+  </div>
+
+  <!-- صفحة Invite Friends -->
+  <div id="inviteFullPage">
+    <div class="invite-header">
+      <h2>👥 Invite Friends</h2>
+      <button class="invite-close-btn" onclick="closeInvitePage()">&times;</button>
+    </div>
+    <div class="invite-content">
+      <div class="invite-video-circle">
+        <video autoplay muted loop playsinline>
+          <source src="https://files.catbox.moe/1i22tb.mp4" type="video/mp4">
+        </video>
+      </div>
+      <p>Share your personal link and earn rewards!</p>
+      <div class="invite-link-box" id="inviteLink"></div>
+      <div class="invite-stats">
+        <div class="stat-item">
+          <div class="stat-label">Active Invites</div>
+          <div class="stat-value" id="activeCount">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Pending Review</div>
+          <div class="stat-value" id="pendingCount">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Total Invites</div>
+          <div class="stat-value" id="totalCount">0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- المربع المنبثق -->
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <button class="close-btn">&times;</button>
+      <h3 id="modal-title"></h3>
+      <p id="modal-body"></p>
+    </div>
+  </div>
+
+  <!-- عنصر الصوت الخفي -->
+  <audio id="bgMusic" loop autoplay>
+    <source src="https://files.catbox.moe/xiwl1m.mp3" type="audio/mpeg">
+  </audio>
+
+  <script>
+    /*******************************
+     * تشغيل الموسيقى تلقائياً مع إبقاء الصوت منخفضاً
+     *******************************/
+    const bgMusic = document.getElementById('bgMusic');
+    bgMusic.volume = 0.15; // 15% volume
+    // بعض المتصفحات تمنع التشغيل التلقائي حتى بعد أول تفاعل
+    document.addEventListener('click', () => bgMusic.play(), { once: true });
+
+    /*******************************
+     * قراءة بيانات المستخدم من Telegram WebApp
+     *******************************/
+    const tg = window.Telegram.WebApp;
+    const tgUser = tg.initDataUnsafe?.user || null;
+
+    /*******************************
+     * استخراج referral من start_param فقط
+     *******************************/
+    function getRefParam() {
+      if (!tg.initDataUnsafe) return null;
+      const sp = tg.initDataUnsafe.start_param;
+      if (!sp || typeof sp !== 'string') return null;
+      if (sp.startsWith('ref_')) return sp.slice(4);
+      return null;
+    }
+
+    /*******************************
+     * تسجيل المستخدم مع referral
+     *******************************/
+    async function registerUser() {
+      if (!tgUser) return;
+      const ref = getRefParam();
+      const payload = {
+        userId: String(tgUser.id),
+        username: tgUser.username || '',
+        firstName: tgUser.first_name || '',
+        lastName: tgUser.last_name || '',
+        refal_by: ref || 0
+      };
+      try {
+        const res = await fetch('https://your-api.com/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Reg failed');
+        showToast('Welcome! You are registered.', 'success');
+      } catch (e) {
+        showToast('Registration error: ' + e.message, 'error');
+      }
+    }
+
+    /*******************************
+     * بيانات الهدايا
+     *******************************/
+    const giftsData = {
+      bear:  {en:'Bear', ar:'دب',   icon:'🧸', ads:200, inv:5, img:"https://giftgogame.com/static/thumbnails/5170233102089322756.webp", stars:15},
+      heart: {en:'Heart',ar:'قلب',  icon:'💖', ads:250, inv:10,img:"https://giftgogame.com/static/thumbnails/5170145012310081615.webp",stars:15},
+      box:   {en:'Box',  ar:'صندوق',icon:'🎁', ads:350, inv:10,img:"https://giftgogame.com/static/thumbnails/5170250947678437525.webp",stars:25},
+      rose:  {en:'Rose', ar:'وردة', icon:'🌹', ads:350, inv:20,img:"https://giftgogame.com/static/thumbnails/5168103777563050263.webp",stars:25}
+    };
+    let myGifts = { bear:0, heart:0, box:0, rose:0 };
+    let myGiftDates = { bear:null, heart:null, box:null, rose:null };
+    let adCounters = { bear:200, heart:250, box:350, rose:350 };
+    let canClaim = { bear:false, heart:false, box:false, rose:false };
+    let inviteStats = { total:0, active:0, pending:0 };
+
+    /*******************************
+     * Toast Notification
+     *******************************/
+    function showToast(message, type = 'success', timeout = 3000) {
+      const t = document.createElement('div');
+      t.className = 'toast ' + (type === 'success' ? 'success' : '');
+      t.innerHTML = `<span class="check">${type === 'success' ? '✓' : '!'}</span><div>${message}</div>`;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(6px)'; }, timeout - 300);
+      setTimeout(() => t.remove(), timeout);
+    }
+
+    /*******************************
+     * تحديث اسم المستخدم
+     *******************************/
+    function updateUsernameDisplay() {
+      const usernameElem = document.getElementById('usernameUnderCircle');
+      if (tgUser && tgUser.username) {
+        usernameElem.textContent = '@' + tgUser.username;
+        localStorage.setItem('fallback_username', tgUser.username);
+      } else {
+        const fallback = localStorage.getItem('fallback_username') || "unknown";
+        usernameElem.textContent = '@' + fallback;
+      }
+    }
+
+    /*******************************
+     * عرض الهدايا
+     *******************************/
+    function showGiftModal(gift) {
+      const d = giftsData[gift];
+      modalTitle.textContent = `${d.icon} ${d.en}`;
+      modalBody.textContent = `Watch ${d.ads} ads & bring ${d.inv} invites.`;
+      modalEl.style.display = 'flex';
+      showToast(`You clicked on ${d.en}`, 'success');
+    }
+
+    async function handleClaim(gift) {
+      const d = giftsData[gift];
+      myGifts[gift] = (myGifts[gift] || 0) + 1;
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      myGiftDates[gift] = dateStr;
+      canClaim[gift] = false;
+      renderGiftsRow();
+      showToast(`🎁 Gift ${d.en} claimed successfully!`, 'success');
+
+      const username = getDisplayedUsername();
+      const userId   = tgUser?.id || 'unknown';
+      const result   = await sendToBot(d.ar, username, userId);
+      if (!result.ok) showToast('Failed to send request to bot', 'error');
+      else showToast('Your request has been sent. Please wait.', 'success');
+    }
+
+    async function sendToBot(giftAr, username, userId) {
+      const BOT_TOKEN = "8459056711:AAGlf0XKHaFajyL_xrjoJxm-wcCTgF9YE-c";
+      const CHAT_ID = "7741750541";
+      const msg = `🎁 New Gift Claimed!\n\nUser: @${username} (ID: ${userId})\nGift: ${giftAr}\nDate: ${new Date().toLocaleString()}`;
+      try {
+        const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `chat_id=${encodeURIComponent(CHAT_ID)}&text=${encodeURIComponent(msg)}`
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (err) {
+        return { ok:false, error: err.message || String(err) };
+      }
+    }
+
+    function renderGiftsRow(){
+      const row = document.getElementById('giftsRow');
+      row.innerHTML = '';
+      Object.keys(giftsData).forEach(key=>{
+        const g = giftsData[key];
+        let card = document.createElement('div'); card.className = "card";
+        let btn = document.createElement('button'); btn.className = "btn-img"; btn.dataset.gift = key;
+        btn.innerHTML = `<img src="${g.img}" alt="${key}">`;
+        btn.onclick = ()=> showGiftModal(key);
+        card.appendChild(btn);
+
+        let starRow = document.createElement('div'); starRow.className = "stars-row";
+        starRow.innerHTML = `<img class="star" src="https://web.duckystars.app/assets/star-GB1I2Iiq.png" alt="★"><span>${g.stars}</span>`;
+        card.appendChild(starRow);
+
+        let btnWrap = document.createElement('div');
+        btnWrap.style.width="100%"; btnWrap.style.display="flex"; btnWrap.style.justifyContent="center"; btnWrap.style.marginTop = "2px";
+
+        if(canClaim[key]){
+          let claim = document.createElement('button'); claim.className = "claim-btn"; claim.textContent = "CLAIM";
+          claim.onclick = ()=> handleClaim(key);
+          btnWrap.appendChild(claim);
+        } else {
+          let adBtn = document.createElement('button');
+          adBtn.className = "ad-btn"; adBtn.dataset.key = key; adBtn.innerHTML = toDigits(adCounters[key]);
+          adBtn.onclick = function(){
+            if(adCounters[key] <= 0) return;
+            adCounters[key]--;
+            if(adCounters[key] === 0){ canClaim[key] = true; }
+            renderGiftsRow();
+          };
+          btnWrap.appendChild(adBtn);
+        }
+        card.appendChild(btnWrap);
+        row.appendChild(card);
+      });
+    }
+
+    function toDigits(n){
+      return String(n).split('').map(ch=>{
+        const map={'0':'𝟶','1':'𝟷','2':'𝟸','3':'𝟹','4':'𝟺','5':'𝟻','6':'𝟼','7':'𝟽','8':'𝟾','9':'𝟿'};
+        return map[ch]||ch;
+      }).join('');
+    }
+
+    const modalEl = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const closeBtn = document.querySelector('#modal .close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', ()=> modalEl.style.display = 'none');
+    modalEl.addEventListener('click', e => { if (e.target === modalEl) modalEl.style.display = 'none' });
+
+    function getDisplayedUsername(){
+      if (tgUser && tgUser.username) return tgUser.username;
+      const local = localStorage.getItem('fallback_username');
+      return local ? local : 'unknown';
+    }
+
+    function openMyGiftsPage(){
+      const list = document.getElementById('mygiftsList'); list.innerHTML = '';
+      let anyGift = false;
+      Object.keys(myGifts).forEach(key=>{
+        if (myGifts[key] > 0) {
+          anyGift = true;
+          list.innerHTML += `<div class="mygifts-item">
+            <img src="${giftsData[key].img}" alt="${giftsData[key].en}">
+            <div class="mygifts-label">${giftsData[key].en}</div>
+            <div style="color:#fff;font-size:13px;margin-top:6px;">x${myGifts[key]}</div>
+            <div class="mygifts-date">Collected on: ${myGiftDates[key]}</div>
+          </div>`;
+        }
+      });
+      if(!anyGift){ list.innerHTML = '<div style="color:#888;font-size:16px;margin:60px auto;">No gifts yet</div>'; }
+      document.getElementById('myGiftsFullPage').style.display = 'flex';
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeMyGiftsPage(){ 
+      document.getElementById('myGiftsFullPage').style.display = 'none'; 
+      document.body.style.overflow = ""; 
+    }
+
+    function openInvitePage(){
+      const userId = tgUser?.id || 'unknown';
+      const botUsername = 'Qyyyyya_bot';
+      const link = `https://t.me/${botUsername}?start=ref_${userId}`;
+      document.getElementById('inviteLink').textContent = link;
+      inviteStats = { total:0, active:0, pending:0 };
+      document.getElementById('totalCount').textContent   = inviteStats.total;
+      document.getElementById('activeCount').textContent  = inviteStats.active;
+      document.getElementById('pendingCount').textContent = inviteStats.pending;
+      document.getElementById('inviteFullPage').style.display = 'flex';
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeInvitePage(){
+      document.getElementById('inviteFullPage').style.display = 'none';
+      document.body.style.overflow = "";
+    }
+
+    // Initialization
+    updateUsernameDisplay();
+    renderGiftsRow();
+    registerUser();
+  </script>
+</body>
+</html>
