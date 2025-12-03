@@ -1,39 +1,44 @@
 <!DOCTYPE html>
-<html lang=&quot;ar&quot;>
+<html lang="ar">
 <head>
-    <meta charset=&quot;UTF-8&quot;>
+    <meta charset="UTF-8">
     <title>إعلان تلقائي كل 10 ثوانٍ</title>
-    
-    <!-- شيفرة الـ SDK -->
-   <script src="https://libtl.com/sdk.js" 
-  data-zone="10245709" 
-  data-sdk="show_10245709">
-</script>
-    
     <style>
         body { font-family: Arial; direction: rtl; padding: 30px; }
         #status { margin-top: 20px; font-weight: bold; color: #007bff; }
     </style>
 </head>
 <body>
-    
+
     <h1>تجربة إعلان تلقائي كل 10 ثوانٍ</h1>
     <p>سيظهر الإعلان تلقائياً فور فتح الصفحة، ثم يتكرّر كل 10 ثوانٍ.</p>
-    <div id=&quot;status&quot;>تم تفعيل الإعلانات التلقائية</div>
-    
+    <div id="status">تم تفعيل الإعلانات التلقائية</div>
+
+    <!-- شيفرة الـ SDK -->
+    <script src="//libtl.com/sdk.js" 
+            data-zone="10245709" 
+            data-sdk="show_10245709">
+    </script>
+
+    <!-- السكربت الداخلي بعد تحميل الـ SDK -->
     <script>
-        // استدعاء الإعلان التلقائي
-        show_10245709({
-            type: 'inApp',
-            inAppSettings: {
-                frequency: 999,     // عدد كبير للسماح بإعلانات متعددة
-                capping: 1,         // جلسة لمدة ساعة واحدة
-                interval: 10,       // 10 ثوانٍ بين الإعلانات
-                timeout: 0,         // يظهر فوراً
-                everyPage: false    // عدم إعادة تعيين الجلسة
+        window.addEventListener('load', function () {
+            if (typeof show_10245709 === 'function') {
+                show_10245709({
+                    type: 'inApp',
+                    inAppSettings: {
+                        frequency: 999,
+                        capping: 1,
+                        interval: 10,
+                        timeout: 0,
+                        everyPage: false
+                    }
+                });
+            } else {
+                console.error("لم يتم تحميل دالة الإعلان show_10245709");
             }
         });
     </script>
-    
+
 </body>
 </html>
