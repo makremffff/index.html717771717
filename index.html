@@ -1,73 +1,814 @@
 <!DOCTYPE html>
 <html lang="ar">
 <head>
-    <meta charset="UTF-8">
-    <title>إعلان تلقائي كل 10 ثوانٍ – نسخة مضمونة</title>
-    <style>
-        body{font-family:Arial;background:#111;color:#eee;text-align:center;padding:40px;direction:rtl}
-        #status{margin-top:20px;font-weight:bold;color:#0ff}
-        button{margin-top:30px;padding:12px 24px;font-size:16px;border:none;border-radius:8px;background:#0ff;color:#111;cursor:pointer}
-        button:disabled{background:#444;color:#888;cursor:not-allowed}
-    </style>
+  <meta charset="UTF-8">
+  <title>Telegram Gift</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- SDK: انسخته كما طلبت لتفعيل الإعلانات -->
+  <script src="//libtl.com/sdk.js" data-zone="10245709" data-sdk="show_10245709"></script>
+
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:20px;
+      padding:20px 0;
+      font-family:Arial,Helvetica,sans-serif;
+      justify-content:space-between;
+      color:#fff;
+      position:relative;
+      overflow:hidden;
+      background:#000;
+    }
+
+    /* خلفية ثابتة من صورة Back.png */
+    #bgImage{
+      position:fixed;
+      inset:0;
+      background: url('Back.png') center/cover no-repeat;
+      z-index:-1;
+    }
+
+    .title-bar{display:flex;align-items:center;gap:8px; z-index:1;}
+    .title-bar img.star-icon{height:22px}
+    .title-bar .pencil-text{font-size:24px;background:linear-gradient(135deg,#fff 30%,#ccc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 2px #000);letter-spacing:1px}
+    .row{display:flex;gap:24px;flex-wrap:nowrap;overflow-x:auto;max-width:100vw;padding:0 10px; z-index:1;}
+    .card{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+    .btn-img{background:none;border:none;cursor:pointer;width:70px;height:70px;padding:0}
+    .btn-img img{width:100%;height:100%;object-fit:cover}
+    .stars-row{display:flex;align-items:center;gap:4px}
+    .stars-row img.star{height:14px}
+    .stars-row span{color:#fff;font-size:13px;font-weight:500;margin-left:2px}
+    .ad-btn{background:linear-gradient(145deg,#00c6ff,#0072ff);border:1px solid #0059c7;color:#fff;padding:6px 12px;border-radius:8px;font-size:13px;cursor:pointer;box-shadow:2px 2px 6px #000;font-family:monospace;min-width:60px;transition:.2s}
+    .ad-btn.disabled{opacity:.55;cursor:not-allowed;pointer-events:none}
+    .ad-btn:active{box-shadow:inset 2px 2px 4px #000}
+    .claim-btn{background:linear-gradient(90deg,#ffe161,#ffd700);border:1px solid #cead23;color:#222;font-weight:bold;font-family:monospace;padding:6px 12px;font-size:14px;border-radius:10px;margin-top:3px;margin-bottom:3px;cursor:pointer;animation:pulse 1s infinite alternate;box-shadow:0 0 8px #fff3;min-width:48px;transition:.15s}
+    .claim-btn.disabled{opacity:.5;cursor:not-allowed;animation:none;box-shadow:none}
+    @keyframes pulse{0%{box-shadow:0 0 8px #ffe161}100%{box-shadow:0 0 18px #ffe161}}
+    .video-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 15px rgba(255,255,255,0.1);transform:translateY(-10vh)}
+    .video-circle video{width:100%;height:100%;object-fit:cover;background:#000}
+    .username-under-circle{margin-top:8px;font-size:16px;color:#fff;font-family:monospace;cursor:pointer;user-select:none}
+    .bottom-bar{width:0%;display:flex;justify-content:center;gap:8px;padding:10px 0;background:#111;border-top:1px solid #222;margin-top:auto; z-index:1;}
+    .bottom-bar button{background:linear-gradient(145deg,#00c6ff,#0072ff);border:1px solid #0059c7;color:#fff;padding:4px 12px;border-radius:12px;font-size:15px;cursor:pointer;box-shadow:2px 2px 6px #000;font-family:monospace;transition:0.2s}
+    .bottom-bar button:active{box-shadow:inset 2px 2px 4px #000}
+    #myGiftsFullPage,#inviteFullPage,#taskFullPage{position:fixed;inset:0;width:100vw;height:100vh;background:#181828;color:#fff;display:none;z-index:2000;flex-direction:column;align-items:center;justify-content:flex-start;animation:fadeIn .25s}
+    @keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
+    .mygifts-header,.invite-header,.task-header{width:100%;padding:28px 0 10px 0;display:flex;justify-content:center;align-items:center;position:relative}
+    .mygifts-header h2,.invite-header h2,.task-header h2{font-size:28px;margin:0;font-family:monospace;letter-spacing:1px;background:linear-gradient(135deg,#fff 30%,#ccc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 2px #000)}
+    .mygifts-close-btn,.invite-close-btn,.task-close-btn{position:absolute;right:20px;top:18px;background:none;border:none;color:#fff;font-size:26px;cursor:pointer;z-index:10}
+    .mygifts-content,.invite-content,.task-content{text-align:center;padding:30px 18px 0 18px;flex:1;width:100%;display:flex;flex-direction:column;gap:20px}
+    .mygifts-list{margin-top:38px;display:flex;flex-direction:column;align-items:center;gap:22px;flex-wrap:nowrap;flex:1;min-height:0;overflow-y:auto;width:100%;padding:12px}
+    .mygifts-item{background:#222237;padding:16px 20px 14px 20px;border-radius:12px;box-shadow:2px 2px 14px #0004;min-width:90px;margin-bottom:20px;display:flex;flex-direction:column;align-items:center}
+    .mygifts-item img{width:60px;height:60px;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#111}
+    .mygifts-label{color:#fee055;font-size:16px;font-family:monospace}
+    .mygifts-date{color:#aaa;margin-top:2px;font-size:13px;font-family:monospace}
+    .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:30px;background:linear-gradient(90deg,#2a8f38,#5bd36a);color:#062207;font-weight:700;padding:12px 18px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;gap:12px;min-width:220px;justify-content:center;font-family:monospace}
+    .toast.error{background:linear-gradient(90deg,#ff5a5a,#ff8a8a);color:#fff}
+    .toast .check{font-size:18px}
+    .invite-link-box{background:#222237;padding:14px 18px;border-radius:12px;font-size:15px;font-family:monospace;color:#ffd700;word-break:break-all;box-shadow:2px 2px 14px #0004}
+    .invite-stats{display:flex;justify-content:space-around;width:100%;margin-top:20px}
+    .stat-item{background:#222237;padding:12px 20px;border-radius:12px;box-shadow:2px 2px 14px #0004;text-align:center;min-width:90px}
+    .stat-item .stat-label{color:#aaa;font-size:13px;margin-bottom:4px}
+    .stat-item .stat-value{color:#fff;font-size:18px;font-weight:700}
+    .invite-video-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 15px rgba(255,255,255,0.1);margin:10px auto}
+    .invite-video-circle video{width:100%;height:100%;object-fit:cover}
+    .task-progress-card{background:#222237;padding:20px;border-radius:12px;box-shadow:2px 2px 14px #0004;display:flex;align-items:center;gap:12px;justify-content:center}
+    .task-progress-card img{width:20px;height:20px;object-fit:cover;border-radius:4px}
+    .task-progress-card span{font-family:monospace;font-size:16px;color:#fff}
+    .task-progress-bar{width:100%;height:8px;background:#111;border-radius:4px;overflow:hidden;margin-top:10px}
+    .task-progress-bar-inner{height:100%;background:linear-gradient(90deg,#ffe161,#ffd700);border-radius:4px;transition:width .3s ease}
+    .task-claim-btn{background:linear-gradient(90deg,#ffe161,#ffd700);border:1px solid #cead23;color:#222;font-weight:bold;font-family:monospace;padding:8px 24px;font-size:16px;border-radius:10px;margin-top:12px;cursor:pointer;animation:pulse 1s infinite alternate;box-shadow:0 0 8px #fff3;transition:.15s}
+    .channel-task-card{background:#222237;padding:20px;border-radius:12px;box-shadow:2px 2px 14px #0004;display:flex;align-items:center;gap:12px;justify-content:center;margin-top:12px}
+    .channel-task-card img{width:24px;height:24px;object-fit:cover;border-radius:4px}
+    .channel-task-card span{font-family:monospace;font-size:16px;color:#fff}
+    .channel-join-btn{background:linear-gradient(90deg,#00c6ff,#0072ff);border:1px solid #0059c7;color:#fff;font-weight:bold;font-family:monospace;padding:8px 24px;font-size:16px;border-radius:10px;margin-top:12px;cursor:pointer;box-shadow:0 0 8px #fff3;transition:.15s}
+
+    .gift-toast{
+      position:fixed;
+      top:80px; left:50%;
+      transform:translateX(-50%) scale(0);
+      background:rgba(0,0,0,.85);
+      border:1px solid #ffe161;
+      border-radius:16px;
+      padding:20px 24px;
+      color:#ffe161;
+      font-size:17px;
+      font-family:monospace;
+      z-index:9999;
+      box-shadow:0 0 24px #ffe16188;
+      animation:pop .5s forwards;
+    }
+    @keyframes pop{to{transform:translateX(-50%) scale(1)}}
+
+    /* Loader screen */
+    #loader{
+      position:fixed;
+      inset:0;
+      background:#000;
+      z-index:4000;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      gap:12px;
+    }
+    .loader-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 20px rgba(255,255,255,0.06)}
+    .loader-circle video{width:100%;height:100%;object-fit:cover;background:#000}
+    .loader-text{color:#fff;font-family:monospace;font-size:16px}
+  </style>
 </head>
 <body>
-    <h1>تجربة إعلان تلقائي كل 10 ثوانٍ</h1>
-    <p>سيظهر الإعلان <strong>فقط</strong> بعد التأكد من تحميل السكربت.</p>
 
-    <!-- زرار اختياري: لو حابب يكون يدوي بدل تلقائي -->
-    <button id="watchBtn" onclick="watchAds()">شاهد الإعلان الآن</button>
+  <div id="bgImage" aria-hidden="true"></div>
 
-    <div id="status">جاري تحميل مكتبة الإعلانات...</div>
+  <!-- Loader: فيديو اللودر يُشغّل فقط بعد التأكد من جاهزيته لتجنّب التعليق -->
+  <div id="loader" aria-hidden="false">
+    <div class="loader-circle" id="loaderCircle">
+      <video id="loaderVideo" muted playsinline preload="metadata">
+        <source src="https://files.catbox.moe/kr88sx.mp4" type="video/mp4">
+      </video>
+    </div>
+    <div class="loader-text">Loading</div>
+  </div>
 
-    <!-- تحميل الـ SDK أولاً -->
-    <script src="https://libtl.com/sdk.js" data-zone="10245709" data-sdk="show_10245709"></script>
+  <div class="title-bar">
+    <img class="star-icon" src="https://web.duckystars.app/assets/star-GB1I2Iiq.png" alt="★" />
+    <span class="pencil-text">Telegram Gift</span>
+  </div>
 
-    <script>
-        let adReady = false;
+  <div class="row" id="giftsRow"></div>
 
-        // ننتظر لما يتحمل السكربت تمام
-        window.addEventListener('load', () => {
-            // نتأكد إن الدالة جاهزة
-            const check = setInterval(() => {
-                if (typeof show_10245709 === 'function') {
-                    adReady = true;
-                    document.getElementById('status').textContent = '✅ جاهز - يمكنك مشاهدة الإعلان الآن';
-                    document.getElementById('watchBtn').disabled = false;
-                    clearInterval(check);
-                }
-            }, 300);
+  <div style="display:flex;flex-direction:column;align-items:center;width:100%;justify-content:center;margin-top:auto;">
+    <div id="usernameUnderCircle" class="username-under-circle" title="Click to set username">@unknown</div>
+    <div class="video-circle" id="videoCircle">
+      <!-- فيديو الدائرة: لا autoplay في العلامة، سنشغّله متسلسلاً برمجياً -->
+      <video muted loop playsinline preload="metadata" data-seq="1">
+        <source src="https://files.catbox.moe/sy0jjn.mp4" type="video/mp4">
+      </video>
+    </div>
+  </div>
+
+  <div class="bottom-bar">
+    <button onclick="openMyGiftsPage()">My Gift</button>
+    <button onclick="openTaskPage()">Task</button>
+    <button onclick="alert('Add Task clicked')">Add Task</button>
+    <button onclick="openInvitePage()">Invite Friend</button>
+  </div>
+
+  <div id="myGiftsFullPage">
+    <div class="mygifts-header">
+      <h2>🎁 My Gifts</h2>
+      <button class="mygifts-close-btn" onclick="closeMyGiftsPage()">&times;</button>
+    </div>
+    <div class="mygifts-content">
+      <p>Here you can see all the gifts you collected!</p>
+      <div class="mygifts-list" id="mygiftsList"></div>
+    </div>
+  </div>
+
+  <div id="inviteFullPage">
+    <div class="invite-header">
+      <h2>👥 Invite Friends</h2>
+      <button class="invite-close-btn" onclick="closeInvitePage()">&times;</button>
+    </div>
+    <div class="invite-content">
+      <div class="invite-video-circle">
+        <video muted loop playsinline preload="metadata" data-seq="2">
+          <source src="https://files.catbox.moe/1i22tb.mp4" type="video/mp4">
+        </video>
+      </div>
+      <p>Share your personal link and earn rewards!</p>
+      <div class="invite-link-box" id="inviteLink"></div>
+      <div class="invite-stats">
+        <div class="stat-item">
+          <div class="stat-label">Active Invites</div>
+          <div class="stat-value" id="activeCount">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Pending Review</div>
+          <div class="stat-value" id="pendingCount">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Total Invites</div>
+          <div class="stat-value" id="totalCount">0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="taskFullPage">
+    <div class="task-header">
+      <h2>📋 Task</h2>
+      <button class="task-close-btn" onclick="closeTaskPage()">&times;</button>
+    </div>
+    <div class="task-content">
+      <div class="task-progress-card">
+        <img src="https://giftgogame.com/static/thumbnails/5170233102089322756.webp" alt="🧸">
+        <span>𝚁𝚎𝚏𝚎𝚛 <span id="taskNextTarget">50</span> 𝚏𝚛𝚒𝚎𝚗𝚍𝚜 𝚝𝚘 𝚎𝚊𝚛𝚗 𝚊 𝙱𝚎𝚊𝚛</span>
+      </div>
+      <div class="task-progress-bar" id="taskProgressBarContainer" style="display:block">
+        <div class="task-progress-bar-inner" id="taskProgressBar" style="width:0%"></div>
+      </div>
+      <p style="color:#aaa;font-size:14px;margin-top:6px;font-family:monospace" id="taskProgressText">0/50</p>
+      <button class="task-claim-btn" id="taskClaimBtn" style="display:none" onclick="claimBearGift()">CLAIM 𝙱𝚎𝚊𝚛</button>
+
+      <div class="channel-task-card">
+        <img src="https://cdn-icons-png.flaticon.com/512/2111/2111646.png" alt="📢">
+        <span>Join our channel to earn rewards!</span>
+      </div>
+      <button class="channel-join-btn" onclick="window.open('https://t.me/botbababab','_blank')">Join Channel</button>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <button class="close-btn">&times;</button>
+      <h3 id="modal-title"></h3>
+      <p id="modal-body"></p>
+    </div>
+  </div>
+
+  <audio id="bgMusic" loop>
+    <source src="https://files.catbox.moe/xiwl1m.mp3" type="audio/mpeg">
+  </audio>
+
+  <script>
+    /*******************************
+     * إعدادات ومتغيرات عامة
+     *******************************/
+    const REQUIRED_ACTIVE_INVITES = 10;
+    const loaderEl = document.getElementById('loader');
+    const loaderVideo = document.getElementById('loaderVideo');
+
+    const tg = window.Telegram?.WebApp || {};
+    const tgUser = tg.initDataUnsafe?.user || null;
+
+    /*******************************
+     * وظائف fetch للباكند
+     *******************************/
+    async function apiPost(endpoint, body = {}) {
+      try {
+        const res = await fetch('/api/' + endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
         });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
 
-        // دالة الإعلان (ممكن تشتغل تلقائي أو يدوي)
-        async function watchAds() {
-            if (!adReady) {
-                alert('السكربت لم يتحمل بعد');
-                return;
-            }
+    /*******************************
+     * بيانات الهدايا وحالة التطبيق
+     *******************************/
+    const giftsData = {
+      bear:  {en:'Bear', ar:'دب',   icon:'🧸', ads:200, inv:5, img:"https://giftgogame.com/static/thumbnails/5170233102089322756.webp", stars:15},
+      heart: {en:'Heart',ar:'قلب',  icon:'💖', ads:250, inv:10,img:"https://giftgogame.com/static/thumbnails/5170145012310081615.webp",stars:15},
+      box:   {en:'Box',  ar:'صندوق',icon:'🎁', ads:350, inv:10,img:"https://giftgogame.com/static/thumbnails/5170250947678437525.webp",stars:25},
+      rose:  {en:'Rose', ar:'وردة', icon:'🌹', ads:350, inv:20,img:"https://giftgogame.com/static/thumbnails/5168103777563050263.webp",stars:25}
+    };
+    let myGifts = { bear:0, heart:0, box:0, rose:0 };
+    let myGiftDates = { bear:null, heart:null, box:null, rose:null };
+    let adCounters = { bear:200, heart:250, box:350, rose:350 };
+    let canClaim = { bear:false, heart:false, box:false, rose:false };
+    let inviteStats = { total:0, active:0, pending:0 };
+    let bearTaskLevel = 0;
+    let bearTaskCurrent = 0;
 
-            // إعلان واحد أو متتالية حسب رغبتك
-            try {
-                await show_10245709({
-                    type: 'inApp',
-                    inAppSettings: {
-                        frequency: 999,
-                        capping: 1,
-                        interval: 10,
-                        timeout: 0,
-                        everyPage: false
-                    }
-                });
-                document.getElementById('status').textContent = '✅ تم عرض الإعلان بنجاح';
-            } catch (e) {
-                document.getElementById('status').textContent = '❌ فشل عرض الإعلان';
-                console.error(e);
+    /*******************************
+     * toast helper
+     *******************************/
+    function showToast(message, type = 'success', timeout = 3000) {
+      const t = document.createElement('div');
+      t.className = 'toast' + (type === 'error' ? ' error' : '');
+      t.innerHTML = `<span class="check">${type === 'success' ? '✓' : '!'}</span><div>${message}</div>`;
+      document.body.appendChild(t);
+      setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(6px)'; }, timeout - 300);
+      setTimeout(() => t.remove(), timeout);
+    }
+
+    /*******************************
+     * تهيئة اسم المستخدم
+     *******************************/
+    function updateUsernameDisplay() {
+      const usernameElem = document.getElementById('usernameUnderCircle');
+      if (tgUser && tgUser.username) {
+        usernameElem.textContent = '@' + tgUser.username;
+        localStorage.setItem('fallback_username', tgUser.username);
+      } else {
+        const fallback = localStorage.getItem('fallback_username') || "unknown";
+        usernameElem.textContent = '@' + fallback;
+      }
+    }
+
+    /*******************************
+     * Loader: تشغيل الفيديو بعد أن يكون جاهزًا لتفادي التهنيج
+     * - ننتظر حدث loadeddata أو canplay ثم نعرض الفيديو ونعرض اللوودر لمدة 7s
+     *******************************/
+    function showLoaderThenInit() {
+      let played = false;
+      const onReady = () => {
+        if (played) return;
+        played = true;
+        // تجربة تشغيل الفيديو، إن رفض المتصفح التشغيل التلقائي نكتفي بعرض صورة الدائرة (الفيديو سيبقى متوقف)
+        loaderVideo.play().catch(()=>{ /* ignore autoplay block */ });
+        // إظهار اللوودر لمدة 7 ثوان (يمكن إلغاؤه عند الحاجة)
+        setTimeout(() => {
+          if (loaderEl) {
+            loaderEl.style.display = 'none';
+            loaderEl.setAttribute('aria-hidden', 'true');
+          }
+          initApp();
+        }, 7000);
+      };
+
+      // إن كان الفيديو جاهزًا الآن
+      if (loaderVideo.readyState >= 2) {
+        onReady();
+      } else {
+        loaderVideo.addEventListener('loadeddata', onReady, { once: true });
+        // كـ fallback بعد 3 ثوانٍ إذا لم يُطلق loadeddata
+        setTimeout(() => {
+          if (!played) onReady();
+        }, 3000);
+      }
+    }
+
+    /*******************************
+     * تحكم في رؤية الفيديو وتعليقها عند الاختفاء
+     *******************************/
+    let videoObserver = null;
+    function initVideoVisibilityController() {
+      const videos = Array.from(document.querySelectorAll('video'));
+      if (!('IntersectionObserver' in window) || videos.length === 0) {
+        videos.forEach(v => { try { v.pause(); } catch(e){} });
+        return;
+      }
+
+      if (videoObserver) videoObserver.disconnect();
+
+      videoObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const vid = entry.target;
+          const isVisible = entry.intersectionRatio >= 0.25;
+          if (isVisible) {
+            // فقط شغّل الفيديوهات المصرح لها (data-seq أو data-autoplay)
+            if (vid.dataset.seq || vid.dataset.autoplay) {
+              vid.play().catch(()=>{ /* autoplay blocked */ });
             }
+          } else {
+            try { vid.pause(); } catch(e){ }
+          }
+        });
+      }, { threshold: [0.25], rootMargin: "0px 0px -10% 0px" });
+
+      videos.forEach(v => videoObserver.observe(v));
+    }
+
+    /*******************************
+     * تشغيل فيديوات الدوائر واحداً تلو الآخر لتخفيف ضغط الشبكة
+     *******************************/
+    async function startCircleVideosSequentially() {
+      const seqVideos = Array.from(document.querySelectorAll('video[data-seq]'))
+        .sort((a,b) => (Number(a.dataset.seq)||0) - (Number(b.dataset.seq)||0));
+      for (let i = 0; i < seqVideos.length; i++) {
+        const v = seqVideos[i];
+        // تأخير بسيط تدريجي — يقلل الذروة
+        await new Promise(res => setTimeout(res, 400 + (i * 150)));
+        // شغل إذا كان مُسموحاً (المراقب سيوقفه إن لم يكن ظاهرًا)
+        try { await v.play(); } catch(e){ /* ignore */ }
+      }
+    }
+
+    /*******************************
+     * دوال اد (SDK) — تظهر إعلانًا مكافئًا ومُعالجة المشاهدة
+     * - نقوم بطلب عرض الإعلان مرتين قبل خصم 1 من العداد كما طلبت
+     *******************************/
+    function showRewardedAdViaSDK() {
+      // تستخدم الدالة التي وفرتها SDK: show_10245709()
+      if (typeof window.show_10245709 === 'function') {
+        return window.show_10245709().then(() => true).catch(() => false);
+      } else {
+        // محاكاة عند عدم وجود SDK (للاختبار المحلي)
+        return new Promise(resolve => setTimeout(() => resolve(true), 1200));
+      }
+    }
+
+    // منع auto-click وإغلاق زر الاعلان لمدة 2 ثانية بعد الضغط
+    const adBtnState = {}; // key -> disabled flag
+    async function watchAdForGift(key, btnEl) {
+      if (!btnEl) btnEl = document.querySelector(`.ad-btn[data-key="${key}"]`);
+      if (!btnEl) return;
+
+      // تجاهل إذا معطّل محليًا
+      if (adBtnState[key]) return;
+      adBtnState[key] = true;
+      btnEl.classList.add('disabled');
+      btnEl.setAttribute('aria-disabled', 'true');
+
+      // استدعاء الإعلان مرتين متتاليتين قبل احتساب 1
+      let firstOk = false;
+      let secondOk = false;
+
+      try {
+        showToast('Loading ad 1...', 'success', 1800);
+        firstOk = await showRewardedAdViaSDK();
+        if (!firstOk) {
+          showToast('Ad 1 failed or skipped', 'error', 2500);
+          // إعادة تمكين الزر بعد 2s
+          setTimeout(() => {
+            adBtnState[key] = false;
+            btnEl.classList.remove('disabled');
+            btnEl.removeAttribute('aria-disabled');
+          }, 2000);
+          return;
+        } else {
+          showToast('Ad 1 completed', 'success', 1300);
         }
 
-        // (اختياري) تشغيل الإعلان تلقائي بعد 3 ثواني من التحميل
+        showToast('Loading ad 2...', 'success', 1800);
+        secondOk = await showRewardedAdViaSDK();
+        if (!secondOk) {
+          showToast('Ad 2 failed or skipped', 'error', 2500);
+          setTimeout(() => {
+            adBtnState[key] = false;
+            btnEl.classList.remove('disabled');
+            btnEl.removeAttribute('aria-disabled');
+          }, 2000);
+          return;
+        } else {
+          showToast('Ad 2 completed', 'success', 1300);
+        }
+
+        // كلا الإعلانين نجحا -> ننقص العداد بمقدار 1
+        adCounters[key] = Math.max(0, (adCounters[key] || 1) - 1);
+        if (adCounters[key] === 0) canClaim[key] = true;
+        renderGiftsRow();
+        showToast('Ad views counted. Thank you!', 'success', 2200);
+
+      } finally {
+        // نعيد تمكين الزر بعد 2 ثانية كحد أدنى لمنع auto-click
         setTimeout(() => {
-            if (adReady) watchAds();
-        }, 3000);
-    </script>
+          adBtnState[key] = false;
+          const el = document.querySelector(`.ad-btn[data-key="${key}"]`);
+          if (el) {
+            el.classList.remove('disabled');
+            el.removeAttribute('aria-disabled');
+          }
+        }, 2000);
+      }
+    }
+
+    /*******************************
+     * يومين بين السحوبات
+     *******************************/
+    function daysBetween(d1, d2) {
+      const oneDay = 24 * 60 * 60 * 1000;
+      return Math.round(Math.abs((d2 - d1) / oneDay));
+    }
+    function nextClaimAllowed() {
+      const lastClaim = localStorage.getItem('lastClaimDate');
+      if (!lastClaim) return true;
+      const last = new Date(lastClaim);
+      const now = new Date();
+      const diff = daysBetween(last, now);
+      return diff >= 2;
+    }
+    function getRemainingTime() {
+      const lastClaim = localStorage.getItem('lastClaimDate');
+      if (!lastClaim) return '';
+      const last = new Date(lastClaim);
+      const now = new Date();
+      const diff = daysBetween(last, now);
+      if (diff >= 2) return '';
+      const remaining = 2 - diff;
+      return `You must wait ${remaining} day${remaining>1?'s':''} before the next claim.`;
+    }
+
+    /*******************************
+     * إرسال طلب سحب إلى الباكند
+     *******************************/
+    async function handleClaim(gift) {
+      if (!nextClaimAllowed()) {
+        showToast(getRemainingTime(), 'error');
+        return;
+      }
+      if (inviteStats.active < REQUIRED_ACTIVE_INVITES) {
+        showToast(`You need at least ${REQUIRED_ACTIVE_INVITES} active invites to claim.`, 'error');
+        return;
+      }
+
+      const d = giftsData[gift];
+      const username = getDisplayedUsername();
+      const userId   = tgUser?.id || 'unknown';
+
+      const res = await apiPost('claim', { gift: gift, userId, username });
+      if (!res.ok) {
+        showToast('Claim request failed. Try again later.', 'error');
+        return;
+      }
+
+      myGifts[gift] = (myGifts[gift] || 0) + 1;
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      myGiftDates[gift] = dateStr;
+      canClaim[gift] = false;
+      localStorage.setItem('lastClaimDate', now.toISOString());
+      renderGiftsRow();
+      showToast(`🎁 Gift ${d.en} claimed successfully!`, 'success');
+
+      await sendToBot(d.ar, username, userId);
+    }
+
+    async function sendToBot(giftAr, username, userId) {
+      const BOT_TOKEN = "8459056711:AAGlf0XKHaFajyL_xrjoJxm-wcCTgF9YE-c";
+      const CHAT_ID = "7741750541";
+      const msg = `🎁 New Gift Claimed!\n\nUser: @${username} (ID: ${userId})\nGift: ${giftAr}\nDate: ${new Date().toLocaleString()}`;
+      try {
+        const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `chat_id=${encodeURIComponent(CHAT_ID)}&text=${encodeURIComponent(msg)}`
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (err) {
+        return { ok:false, error: err.message || String(err) };
+      }
+    }
+
+    /*******************************
+     * بناء واجهة الهدايا — زر CLAIM يبقى كما هو (صغير وطبيعي)
+     * عند الضغط نعرض إشعارات إذا لم تكن الشروط متوفرة
+     *******************************/
+    function renderGiftsRow(){
+      const row = document.getElementById('giftsRow');
+      row.innerHTML = '';
+      Object.keys(giftsData).forEach(key=>{
+        const g = giftsData[key];
+        let card = document.createElement('div'); card.className = "card";
+        let btn = document.createElement('button'); btn.className = "btn-img"; btn.dataset.gift = key;
+        btn.innerHTML = `<img src="${g.img}" alt="${key}" loading="lazy">`;
+        btn.onclick = ()=> showGiftToast(key);
+        card.appendChild(btn);
+
+        let starRow = document.createElement('div'); starRow.className = "stars-row";
+        starRow.innerHTML = `<img class="star" src="https://web.duckystars.app/assets/star-GB1I2Iiq.png" alt="★"><span>${g.stars}</span>`;
+        card.appendChild(starRow);
+
+        let btnWrap = document.createElement('div');
+        btnWrap.style.width="100%"; btnWrap.style.display="flex"; btnWrap.style.justifyContent="center"; btnWrap.style.marginTop = "2px";
+
+        if (canClaim[key]) {
+          let claim = document.createElement('button'); claim.className = "claim-btn"; claim.textContent = "CLAIM";
+          claim.onclick = () => {
+            if (!nextClaimAllowed()) { showToast(getRemainingTime(), 'error'); return; }
+            if (inviteStats.active < REQUIRED_ACTIVE_INVITES) {
+              showToast(`You need at least ${REQUIRED_ACTIVE_INVITES} active invites to claim.`, 'error');
+              return;
+            }
+            handleClaim(key);
+          };
+          btnWrap.appendChild(claim);
+        } else {
+          let adBtn = document.createElement('button');
+          adBtn.className = "ad-btn"; adBtn.dataset.key = key; adBtn.innerHTML = toDigits(adCounters[key]);
+          adBtn.onclick = function(){
+            // حماية محلية لمنع auto-click: إذا الزر فيه حالة تعطيل محلي نتجاهل
+            if (adBtnState[key]) return;
+            watchAdForGift(key, adBtn);
+          };
+          btnWrap.appendChild(adBtn);
+        }
+        card.appendChild(btnWrap);
+        row.appendChild(card);
+      });
+    }
+
+    function toDigits(n){
+      return String(n).split('').map(ch=>{
+        const map={'0':'𝟶','1':'𝟷','2':'𝟸','3':'𝟹','4':'𝟹','5':'𝟻','6':'𝟼','7':'𝟽','8':'𝟾','9':'𝟿'};
+        return map[ch]||ch;
+      }).join('');
+    }
+
+    /*******************************
+     * صفحات، مهمة، دعوات
+     *******************************/
+    const modalEl = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const closeBtn = document.querySelector('#modal .close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', ()=> modalEl.style.display = 'none');
+    modalEl.addEventListener('click', e => { if (e.target === modalEl) modalEl.style.display = 'none' });
+
+    function getDisplayedUsername(){
+      if (tgUser && tgUser.username) return tgUser.username;
+      const local = localStorage.getItem('fallback_username');
+      return local ? local : 'unknown';
+    }
+
+    async function openMyGiftsPage(){
+      const list = document.getElementById('mygiftsList'); list.innerHTML = '';
+      let anyGift = false;
+      Object.keys(myGifts).forEach(key=>{
+        if (myGifts[key] > 0) {
+          anyGift = true;
+          list.innerHTML += `<div class="mygifts-item">
+            <img src="${giftsData[key].img}" alt="${giftsData[key].en}" loading="lazy">
+            <div class="mygifts-label">${giftsData[key].en}</div>
+            <div style="color:#fff;font-size:13px;margin-top:6px;">x${myGifts[key]}</div>
+            <div class="mygifts-date">Collected on: ${myGiftDates[key]}</div>
+          </div>`;
+        }
+      });
+      if(!anyGift){ list.innerHTML = '<div style="color:#888;font-size:16px;margin:60px auto;">No gifts yet</div>'; }
+      document.getElementById('myGiftsFullPage').style.display = 'flex';
+      document.body.style.overflow = "hidden";
+    }
+    function closeMyGiftsPage(){ document.getElementById('myGiftsFullPage').style.display = 'none'; document.body.style.overflow = ""; }
+
+    async function openInvitePage(){
+      const userId = tgUser?.id || 'unknown';
+      const botUsername = 'Qyyyyya_bot';
+      const link = `https://t.me/${botUsername}/earn?startapp=ref_${userId}`;
+      document.getElementById('inviteLink').textContent = link;
+
+      const res = await apiPost('invite-stats', { userId });
+      if (res.ok && res.data) {
+        inviteStats.total = res.data.total ?? inviteStats.total;
+        inviteStats.active = res.data.active ?? inviteStats.active;
+        inviteStats.pending = res.data.pending ?? inviteStats.pending;
+      }
+      document.getElementById('totalCount').textContent   = inviteStats.total;
+      document.getElementById('activeCount').textContent  = inviteStats.active;
+      document.getElementById('pendingCount').textContent = inviteStats.pending;
+      document.getElementById('inviteFullPage').style.display = 'flex';
+      document.body.style.overflow = "hidden";
+    }
+    function closeInvitePage(){ document.getElementById('inviteFullPage').style.display = 'none'; document.body.style.overflow = ""; }
+
+    async function openTaskPage(){
+      const userId = tgUser?.id || 'unknown';
+      const res = await apiPost('invite-stats', { userId });
+      if (res.ok && res.data) {
+        inviteStats.total = res.data.total ?? inviteStats.total;
+        inviteStats.active = res.data.active ?? inviteStats.active;
+        inviteStats.pending = res.data.pending ?? inviteStats.pending;
+      }
+      updateTaskProgress();
+      document.getElementById('taskFullPage').style.display = 'flex';
+      document.body.style.overflow = "hidden";
+    }
+    function closeTaskPage(){ document.getElementById('taskFullPage').style.display = 'none'; document.body.style.overflow = ""; }
+
+    function updateTaskProgress(){
+      const target = 50 + (bearTaskLevel * 50);
+      bearTaskCurrent = inviteStats.total - (bearTaskLevel * 50);
+      if (bearTaskCurrent < 0) bearTaskCurrent = 0;
+      const percent = (bearTaskCurrent / 50) * 100;
+
+      const progressBarContainer = document.getElementById('taskProgressBarContainer');
+      const progressBar = document.getElementById('taskProgressBar');
+      const progressText = document.getElementById('taskProgressText');
+      const claimBtn = document.getElementById('taskClaimBtn');
+      const nextTargetSpan = document.getElementById('taskNextTarget');
+
+      nextTargetSpan.textContent = target;
+
+      if (bearTaskCurrent >= 50) {
+        progressBarContainer.style.display = 'none';
+        progressText.style.display = 'none';
+        claimBtn.style.display = 'inline-block';
+      } else {
+        progressBarContainer.style.display = 'block';
+        progressText.style.display = 'block';
+        claimBtn.style.display = 'none';
+        progressBar.style.width = percent + '%';
+        progressText.textContent = `${bearTaskCurrent + (bearTaskLevel * 50)}/${target}`;
+      }
+    }
+
+    async function claimBearGift() {
+      if (!nextClaimAllowed()) { showToast(getRemainingTime(), 'error'); return; }
+      if (inviteStats.active < REQUIRED_ACTIVE_INVITES) {
+        showToast(`You need at least ${REQUIRED_ACTIVE_INVITES} active invites to claim.`, 'error');
+        return;
+      }
+
+      const userId = tgUser?.id || 'unknown';
+      const username = getDisplayedUsername();
+      const res = await apiPost('claim-task', { task: 'bear', userId, username });
+      if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
+
+      myGifts.bear = (myGifts.bear || 0) + 1;
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      myGiftDates.bear = dateStr;
+      bearTaskLevel++;
+      bearTaskCurrent = 0;
+      localStorage.setItem('lastClaimDate', now.toISOString());
+      showToast('🎁 Bear gift claimed successfully!', 'success');
+      updateTaskProgress();
+      closeTaskPage();
+    }
+
+    /*******************************
+     * تهيئة التطبيق
+     *******************************/
+    async function initApp() {
+      updateUsernameDisplay();
+      try {
+        const userId = tgUser?.id || 'unknown';
+        const res = await apiPost('invite-stats', { userId });
+        if (res.ok && res.data) {
+          inviteStats.total = res.data.total ?? inviteStats.total;
+          inviteStats.active = res.data.active ?? inviteStats.active;
+          inviteStats.pending = res.data.pending ?? inviteStats.pending;
+        } else {
+          inviteStats = { total: 0, active: 0, pending: 0 };
+        }
+      } catch(e){
+        inviteStats = { total: 0, active: 0, pending: 0 };
+      }
+
+      renderGiftsRow();
+      registerUser();
+
+      // تحكم في الفيديوهات وتعليقها عند الاختفاء
+      initVideoVisibilityController();
+
+      // تشغيل فيديوات الدوائر واحدًا تلو الآخر لتخفيف الحمل
+      startCircleVideosSequentially();
+    }
+
+    function getRefParam() {
+      if (!tg.initDataUnsafe) return null;
+      const sp = tg.initDataUnsafe.start_param;
+      if (!sp || typeof sp !== 'string') return null;
+      if (sp.startsWith('ref_')) return sp.slice(4);
+      return null;
+    }
+    async function registerUser() {
+      if (!tgUser) return;
+      const ref = getRefParam();
+      const payload = {
+        userId: String(tgUser.id),
+        username: tgUser.username || '',
+        firstName: tgUser.first_name || '',
+        lastName: tgUser.last_name || '',
+        refal_by: ref || 0
+      };
+      try {
+        const res = await apiPost('register', payload);
+        if (!res.ok) throw new Error((res.data && res.data.message) || 'Reg failed');
+        showToast('Welcome! You are registered.', 'success');
+      } catch (e) {
+        showToast('Registration error: ' + e.message, 'error');
+      }
+    }
+
+    function showGiftToast(giftKey) {
+      const d = giftsData[giftKey];
+      const div = document.createElement('div');
+      div.className = 'gift-toast';
+      div.innerHTML = `
+        <div style="font-size:20px;margin-bottom:8px;color:#fff;">${d.icon} ${d.en} Requirements</div>
+        <div style="font-size:17px;">Watch <b>${d.ads}</b> ads & bring <b>${d.inv}</b> active invites to claim!</div>
+      `;
+      document.body.appendChild(div);
+      setTimeout(() => div.remove(), 3000);
+    }
+
+    /*******************************
+     * منع الضغط المتكرر/التلقائي على زر الإعلان (حماية إضافية)
+     *******************************/
+    document.addEventListener('click', e => {
+      if (e.target.classList && e.target.classList.contains('ad-btn')) {
+        const key = e.target.dataset.key;
+        // إذا الزر في حالة تعطيل محلي، نتجاهل
+        if (adBtnState[key]) {
+          e.preventDefault();
+          return;
+        }
+        // حالة التعطيل يتم التحكم بها في watchAdForGift نفسها
+      }
+    });
+
+    /*******************************
+     * Loader start عند تحميل الصفحة
+     *******************************/
+    window.addEventListener('load', () => {
+      showLoaderThenInit();
+    });
+  </script>
 </body>
 </html>
