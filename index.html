@@ -1,51 +1,39 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang=&quot;ar&quot;>
 <head>
-  <meta charset="UTF-8">
-  <title>إعلان تلقائي كل 10 ثوانٍ</title>
-
-  <!-- شيفرة الـ SDK -->
-  <script src="//libtl.com/sdk.js"
-          data-zone="10245709"
-          data-sdk="show_10245709"></script>
-
-  <style>
-    body { font-family: Arial; direction: rtl; padding: 30px; }
-    #status { margin-top: 20px; font-weight: bold; color: #007bff; }
-  </style>
+    <meta charset=&quot;UTF-8&quot;>
+    <title>إعلان تلقائي كل 10 ثوانٍ</title>
+    
+    <!-- شيفرة الـ SDK -->
+    <script src=&quot;//libtl.com/sdk.js&quot; 
+            data-zone=&quot;10245709&quot; 
+            data-sdk=&quot;show_10245709&quot;>
+    </script>
+    
+    <style>
+        body { font-family: Arial; direction: rtl; padding: 30px; }
+        #status { margin-top: 20px; font-weight: bold; color: #007bff; }
+    </style>
 </head>
 <body>
-
-  <h1>تجربة إعلان تلقائي كل 10 ثوانٍ</h1>
-  <p>سيظهر الإعلان تلقائياً فور فتح الصفحة، ثم يتكرّر كل 10 ثوانٍ.</p>
-  <div id="status">جارٍ العدّ…</div>
-
-  <script>
-    let counter = 0;
-
-    function runAd() {
-      counter++;
-      document.getElementById('status').textContent = `تم استدعاء الإعلان #${counter}`;
-
-      /* استدعاء الإعلان */
-      show_10245709({
-        type: 'inApp',
-        inAppSettings: {
-          frequency: 1,      // إعلان واحد فقط في كل دورة
-          capping: 0,        // لا حد زمني
-          interval: 0,       // لا فاصل إضافي
-          timeout: 0,        // يظهر فوراً
-          everyPage: true    // تصفير الجلسة ليتم احتساب الإعلان الجديد
-        }
-      });
-    }
-
-    /* أول إعلان فوراً */
-    runAd();
-
-    /* إعادة كل 10 ثوانٍ */
-    setInterval(runAd, 10_000);
-  </script>
-
+    
+    <h1>تجربة إعلان تلقائي كل 10 ثوانٍ</h1>
+    <p>سيظهر الإعلان تلقائياً فور فتح الصفحة، ثم يتكرّر كل 10 ثوانٍ.</p>
+    <div id=&quot;status&quot;>تم تفعيل الإعلانات التلقائية</div>
+    
+    <script>
+        // استدعاء الإعلان التلقائي
+        show_10245709({
+            type: 'inApp',
+            inAppSettings: {
+                frequency: 999,     // عدد كبير للسماح بإعلانات متعددة
+                capping: 1,         // جلسة لمدة ساعة واحدة
+                interval: 10,       // 10 ثوانٍ بين الإعلانات
+                timeout: 0,         // يظهر فوراً
+                everyPage: false    // عدم إعادة تعيين الجلسة
+            }
+        });
+    </script>
+    
 </body>
 </html>
