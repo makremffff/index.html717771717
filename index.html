@@ -2,29 +2,52 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>إعلان تلقائي كل 10 ثوانٍ</title>
+    <title>إعلان تلقائي كل 10 ثوانٍ – نسخة مضمونة</title>
     <style>
-        body { font-family: Arial; direction: rtl; padding: 30px; }
-        #status { margin-top: 20px; font-weight: bold; color: #007bff; }
+        body{font-family:Arial;background:#111;color:#eee;text-align:center;padding:40px;direction:rtl}
+        #status{margin-top:20px;font-weight:bold;color:#0ff}
+        button{margin-top:30px;padding:12px 24px;font-size:16px;border:none;border-radius:8px;background:#0ff;color:#111;cursor:pointer}
+        button:disabled{background:#444;color:#888;cursor:not-allowed}
     </style>
 </head>
 <body>
-
     <h1>تجربة إعلان تلقائي كل 10 ثوانٍ</h1>
-    <p>سيظهر الإعلان تلقائياً فور فتح الصفحة، ثم يتكرّر كل 10 ثوانٍ.</p>
-    <div id="status">تم تفعيل الإعلانات التلقائية</div>
+    <p>سيظهر الإعلان <strong>فقط</strong> بعد التأكد من تحميل السكربت.</p>
 
-    <!-- شيفرة الـ SDK -->
-    <script src="//libtl.com/sdk.js" 
-            data-zone="10245709" 
-            data-sdk="show_10245709">
-    </script>
+    <!-- زرار اختياري: لو حابب يكون يدوي بدل تلقائي -->
+    <button id="watchBtn" onclick="watchAds()">شاهد الإعلان الآن</button>
 
-    <!-- السكربت الداخلي بعد تحميل الـ SDK -->
+    <div id="status">جاري تحميل مكتبة الإعلانات...</div>
+
+    <!-- تحميل الـ SDK أولاً -->
+    <script src="https://libtl.com/sdk.js" data-zone="10245709" data-sdk="show_10245709"></script>
+
     <script>
-        window.addEventListener('load', function () {
-            if (typeof show_10245709 === 'function') {
-                show_10245709({
+        let adReady = false;
+
+        // ننتظر لما يتحمل السكربت تمام
+        window.addEventListener('load', () => {
+            // نتأكد إن الدالة جاهزة
+            const check = setInterval(() => {
+                if (typeof show_10245709 === 'function') {
+                    adReady = true;
+                    document.getElementById('status').textContent = '✅ جاهز - يمكنك مشاهدة الإعلان الآن';
+                    document.getElementById('watchBtn').disabled = false;
+                    clearInterval(check);
+                }
+            }, 300);
+        });
+
+        // دالة الإعلان (ممكن تشتغل تلقائي أو يدوي)
+        async function watchAds() {
+            if (!adReady) {
+                alert('السكربت لم يتحمل بعد');
+                return;
+            }
+
+            // إعلان واحد أو متتالية حسب رغبتك
+            try {
+                await show_10245709({
                     type: 'inApp',
                     inAppSettings: {
                         frequency: 999,
@@ -34,11 +57,17 @@
                         everyPage: false
                     }
                 });
-            } else {
-                console.error("لم يتم تحميل دالة الإعلان show_10245709");
+                document.getElementById('status').textContent = '✅ تم عرض الإعلان بنجاح';
+            } catch (e) {
+                document.getElementById('status').textContent = '❌ فشل عرض الإعلان';
+                console.error(e);
             }
-        });
-    </script>
+        }
 
+        // (اختياري) تشغيل الإعلان تلقائي بعد 3 ثواني من التحميل
+        setTimeout(() => {
+            if (adReady) watchAds();
+        }, 3000);
+    </script>
 </body>
 </html>
