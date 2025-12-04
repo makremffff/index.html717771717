@@ -1,307 +1,184 @@
-// Supabase-backed serverless backend (Node.js / CommonJS)
-// Updated to use a single table "telegram_gifts" that stores all gift & task records.
-// Routes supported (POST):
-//   /api/register        -> upsert user in `users`
-//   /api/invite-stats    -> return invite stats for a user (counts users with ref_by = userId)
-//   /api/claim           -> record a claimed gift into `telegram_gifts` and update users.last_claim_date
-//   /api/claim-task      -> record a completed task into `telegram_gifts` and update users.last_claim_date
-//
-// Requirements:
-// - Set environment variables: SUPABASE_URL, SUPABASE_ANON_KEY (or NEXT_PUBLIC_* fallbacks)
-// - Ensure table `telegram_gifts` exists with columns compatible with inserts below:
-//     - id (serial / uuid), user_id (int), kind (text)  -- 'gift' | 'task'
-//     - name (text) -- gift name or task name
-//     - username (text), reward_amount (numeric, nullable)
-//     - metadata (jsonb, nullable)
-//     - created_at (timestamp)  -- should default to now() if desired
-// - Table `users` should exist and include last_claim_date (timestamp) and ref_by columns
-//
-// Security note:
-// - Using ANON key server-side is not ideal. Prefer SUPABASE_SERVICE_ROLE_KEY for server operations.
+// api/index.js
+// Hybrid REST + Client-Side Logic WebApp API
+// يعمل على Cloudflare Pages Functions أو أي serverless يدعم file-system routing
+// يعتمد فقط على المتغيرات البيئية:
+//   NEXT_PUBLIC_SUPABASE_URL
+//   NEXT_PUBLIC_SUPABASE_ANON_KEY
+// ويتعامل مع جدول واحد فقط: telegram.logo
 
-const fetch = global.fetch || require('node-fetch');
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.warn('SUPABASE_URL or SUPABASE_ANON_KEY not set. Supabase calls will fail.');
-}
-
-const REQUIRED_ACTIVE_INVITES = 10;
-const MIN_DAYS_BETWEEN_CLAIMS = 2;
-
-// -------------------- supabaseFetch helper --------------------
-async function supabaseFetch(tableName, method, body = null, queryParams = '?select=*') {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error('Supabase environment variables are not configured.');
-  }
-
-  const url = `${SUPABASE_URL}/rest/v1/${tableName}${queryParams}`;
-  const headers = {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+async function supabaseRequest(method, path, body = null, headers = {}) {
+  const url = `${SUPABASE_URL}/rest/v1${path}`;
+  const defaultHeaders = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     'Content-Type': 'application/json',
-    Prefer: 'return=representation'
+    'Accept': 'application/json'
   };
-
   const options = {
     method,
-    headers,
-    body: body ? JSON.stringify(body) : null
+    headers: { ...defaultHeaders, ...headers }
   };
+  if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url, options);
-
-  if (res.ok) {
-    const text = await res.text();
-    try {
-      const json = text ? JSON.parse(text) : { success: true };
-      return Array.isArray(json) ? json : json;
-    } catch (e) {
-      return { success: true };
-    }
-  }
-
-  let errBody = null;
-  try { errBody = await res.json(); } catch (_) { /* ignore */ }
-
-  const msg = (errBody && (errBody.message || errBody.error || JSON.stringify(errBody))) || `${res.status} ${res.statusText}`;
-  const error = new Error(`Supabase error: ${msg}`);
-  error.status = res.status;
-  throw error;
+  const data = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, data };
 }
 
-// -------------------- helpers --------------------
-function sendJSON(res, status = 200, payload = {}) {
-  res.setHeader('Content-Type', 'application/json');
-  res.writeHead(status);
-  res.end(JSON.stringify(payload));
-}
-
-function daysBetweenISO(isoA, isoB) {
-  if (!isoA || !isoB) return Infinity;
-  const a = new Date(isoA);
-  const b = new Date(isoB);
-  const oneDay = 24 * 60 * 60 * 1000;
-  return Math.round(Math.abs((b - a) / oneDay));
-}
-
-async function parseBody(req) {
-  return await new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', chunk => data += chunk.toString());
-    req.on('end', () => {
-      if (!data) return resolve({});
-      try { resolve(JSON.parse(data)); } catch (e) { reject(new Error('Invalid JSON payload')); }
-    });
-    req.on('error', reject);
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
   });
 }
 
-// -------------------- Route handlers --------------------
+// مسار: POST /api/register
+// يستقبل: { userId, username, firstName, lastName, refal_by }
+async function registerUser(payload) {
+  if (!payload.userId) return { ok: false, error: 'userId required' };
 
-/**
- * register
- * Body: { userId, username, firstName, lastName, refal_by }
- */
-async function handleRegister(req, res, body) {
-  const { userId, username, firstName, lastName, refal_by } = body;
-  if (!userId) return sendJSON(res, 400, { ok: false, error: 'Missing userId' });
+  const { ok, status, data } = await supabaseRequest(
+    'POST',
+    '/telegram.logo',
+    {
+      user_id: String(payload.userId),
+      username: payload.username || '',
+      first_name: payload.firstName || '',
+      last_name: payload.lastName || '',
+      refal_by: payload.refal_by ? String(payload.refal_by) : null,
+      created_at: new Date().toISOString()
+    },
+    { 'Prefer': 'return=representation' }
+  );
 
-  const id = parseInt(String(userId), 10);
-
-  try {
-    // check if user exists
-    const users = await supabaseFetch('users', 'GET', null, `?id=eq.${id}&select=id`);
-    if (Array.isArray(users) && users.length > 0) {
-      // update optional fields
-      const payload = {};
-      if (username !== undefined) payload.username = username;
-      if (firstName !== undefined) payload.first_name = firstName;
-      if (lastName !== undefined) payload.last_name = lastName;
-      if (refal_by !== undefined && refal_by !== null && refal_by !== '') payload.ref_by = parseInt(refal_by, 10);
-
-      if (Object.keys(payload).length > 0) {
-        await supabaseFetch('users', 'PATCH', payload, `?id=eq.${id}`);
-      }
-      return sendJSON(res, 200, { ok: true, message: 'User updated' });
-    } else {
-      const newUser = {
-        id,
-        username: username || null,
-        first_name: firstName || null,
-        last_name: lastName || null,
-        ref_by: refal_by ? parseInt(refal_by, 10) : null,
-        balance: 0,
-        ads_watched_today: 0,
-        spins_today: 0,
-        is_banned: false,
-        last_activity: new Date().toISOString(),
-        task_link_clicks_today: 0,
-        task_completed: false
-      };
-      await supabaseFetch('users', 'POST', newUser, '?select=id');
-      return sendJSON(res, 200, { ok: true, message: 'User created' });
-    }
-  } catch (err) {
-    console.error('handleRegister error:', err.message || err);
-    return sendJSON(res, 500, { ok: false, error: 'Registration failed: ' + (err.message || 'Supabase error') });
-  }
+  if (status === 409) return { ok: true, message: 'already exists' };
+  if (!ok) return { ok: false, error: data?.message || 'insert failed' };
+  return { ok: true, data };
 }
 
-/**
- * invite-stats
- * Body: { userId }
- */
-async function handleInviteStats(req, res, body) {
-  const { userId } = body;
-  if (!userId) return sendJSON(res, 400, { ok: false, error: 'Missing userId' });
-
-  const id = parseInt(String(userId), 10);
-
-  try {
-    const referrals = await supabaseFetch('users', 'GET', null, `?ref_by=eq.${id}&select=id,is_banned`);
-    const total = Array.isArray(referrals) ? referrals.length : 0;
-    const active = Array.isArray(referrals) ? referrals.filter(r => !r.is_banned).length : 0;
-    const pending = Math.max(0, total - active);
-    return sendJSON(res, 200, { ok: true, data: { total, active, pending } });
-  } catch (err) {
-    console.error('handleInviteStats error:', err.message || err);
-    return sendJSON(res, 500, { ok: false, error: 'Failed to fetch invite stats: ' + (err.message || 'Supabase error') });
+// مسار: POST /api/invite-stats
+// يستقبل: { userId }
+// يرجع: { total, active, pending }
+async function getInviteStats(userId) {
+  // نقرأ من نفس الجدول telegram.logo
+  const { ok, data } = await supabaseRequest(
+    'GET',
+    `/telegram.logo?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
+  );
+  if (!ok || !Array.isArray(data) || data.length === 0) {
+    return { total: 0, active: 0, pending: 0 };
   }
+  const row = data[0];
+  return {
+    total: row.invites_total || 0,
+    active: row.invites_active || 0,
+    pending: row.invites_pending || 0
+  };
 }
 
-/**
- * claim
- * Body: { gift, userId, username }
- * Behavior:
- *  - cooldown based on users.last_claim_date
- *  - check active invites count
- *  - insert into telegram_gifts with kind='gift'
- *  - update users.last_claim_date
- */
-async function handleClaim(req, res, body) {
-  const { gift, userId, username } = body;
-  if (!gift || !userId) return sendJSON(res, 400, { ok: false, error: 'Missing gift or userId' });
+// مسار: POST /api/claim
+// يستقبل: { gift, userId, username }
+// يُحدّث العداد ويُسجل الهدية
+async function claimGift({ gift, userId, username }) {
+  // أولاً: نتحقق من last_claim_at ونحدّث العداد
+  const now = new Date().toISOString();
+  const giftCol = `gifts_${gift}`;        // gifts_bear | gifts_heart | ...
+  const canCol = `can_claim_${gift}`;     // can_claim_bear | ...
+  const adsCol = `ads_${gift}`;           // ads_bear | ...
 
-  const id = parseInt(String(userId), 10);
-  try {
-    // fetch user
-    const users = await supabaseFetch('users', 'GET', null, `?id=eq.${id}&select=id,username,last_claim_date`);
-    if (!Array.isArray(users) || users.length === 0) return sendJSON(res, 404, { ok: false, error: 'User not found' });
-    const user = users[0];
+  // نحدّف 1 من العداد ونصفّر can_claim
+  const { ok: updOk, data: updData } = await supabaseRequest(
+    'PATCH',
+    `/telegram.logo?user_id=eq.${userId}`,
+    {
+      [adsCol]: 0,
+      [canCol]: false,
+      last_claim_at: now,
+      updated_at: now
+    },
+    { 'Prefer': 'return=representation' }
+  );
+  if (!updOk) return { ok: false, error: updData?.message || 'update failed' };
 
-    const nowISO = new Date().toISOString();
-    if (user.last_claim_date) {
-      const days = daysBetweenISO(user.last_claim_date, nowISO);
-      if (days < MIN_DAYS_BETWEEN_CLAIMS) {
-        return sendJSON(res, 429, { ok: false, error: `You must wait ${MIN_DAYS_BETWEEN_CLAIMS} days between claims` });
-      }
-    }
+  // نزيد الهدية بـ +1
+  const { ok: incOk, data: incData } = await supabaseRequest(
+    'PATCH',
+    `/telegram.logo?user_id=eq.${userId}`,
+    {
+      [giftCol]: `telegram.logo.${giftCol} + 1`
+    },
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
+  );
+  if (!incOk) return { ok: false, error: incData?.message || 'increment failed' };
 
-    // check active invites
-    const referrals = await supabaseFetch('users', 'GET', null, `?ref_by=eq.${id}&select=id,is_banned`);
-    const activeCount = Array.isArray(referrals) ? referrals.filter(r => !r.is_banned).length : 0;
-    if (activeCount < REQUIRED_ACTIVE_INVITES) {
-      return sendJSON(res, 403, { ok: false, error: `Not enough active invites (need ${REQUIRED_ACTIVE_INVITES})` });
-    }
-
-    // Insert into telegram_gifts
-    const giftRecord = {
-      user_id: id,
-      kind: 'gift',
-      name: String(gift),
-      username: username || (user.username || null),
-      reward_amount: null,
-      metadata: { source: 'web', active_invites: activeCount },
-      created_at: nowISO
-    };
-    await supabaseFetch('telegram_gifts', 'POST', giftRecord, '?select=user_id');
-
-    // update user's last_claim_date
-    await supabaseFetch('users', 'PATCH', { last_claim_date: nowISO }, `?id=eq.${id}`);
-
-    return sendJSON(res, 200, { ok: true, data: { gift, user_id: id, created_at: nowISO } });
-  } catch (err) {
-    console.error('handleClaim error:', err.message || err);
-    return sendJSON(res, 500, { ok: false, error: 'Claim failed: ' + (err.message || 'Supabase error') });
-  }
+  return { ok: true, data: incData };
 }
 
-/**
- * claim-task
- * Body: { task, userId, username, reward_amount? }
- * Behavior:
- *  - prevent duplicate task completion by checking telegram_gifts for same user/kind='task'/name
- *  - insert a 'task' record into telegram_gifts (single-table approach)
- *  - update users.last_claim_date (optional)
- */
-async function handleClaimTask(req, res, body) {
-  const { task, userId, username, reward_amount } = body;
-  if (!task || !userId) return sendJSON(res, 400, { ok: false, error: 'Missing task or userId' });
+// مسار: POST /api/claim-task
+// يستقبل: { task, userId, username }
+// يُحدّف المهمة ويزيد gifts_bear
+async function claimTask({ task, userId, username }) {
+  const now = new Date().toISOString();
 
-  const id = parseInt(String(userId), 10);
-  try {
-    // check duplicate (in telegram_gifts)
-    // Note: encodeURIComponent not necessary for REST filter but keep safe usage for strings with spaces
-    const encodedTask = encodeURIComponent(String(task));
-    const duplicates = await supabaseFetch('telegram_gifts', 'GET', null, `?user_id=eq.${id}&kind=eq.task&name=eq.${encodedTask}&select=id`);
-    if (Array.isArray(duplicates) && duplicates.length > 0) {
-      return sendJSON(res, 409, { ok: false, error: 'Task already claimed' });
+  // نزيد gifts_bear بـ 1
+  const { ok, data } = await supabaseRequest(
+    'PATCH',
+    `/telegram.logo?user_id=eq.${userId}`,
+    {
+      gifts_bear: `telegram.logo.gifts_bear + 1`,
+      updated_at: now
+    },
+    { 'Prefer': 'return=representation' }
+  );
+  if (!ok) return { ok: false, error: data?.message || 'task claim failed' };
+  return { ok: true, data };
+}
+
+// المُعالج الرئيسي (Cloudflare Pages Functions)
+export default {
+  async fetch(request, env) {
+    // استخراج المتغيرات البيئية إذا لم تكن موجودة
+    if (!SUPABASE_URL) {
+      global.process.env.NEXT_PUBLIC_SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
+      global.process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     }
 
-    const nowISO = new Date().toISOString();
-    const taskRecord = {
-      user_id: id,
-      kind: 'task',
-      name: String(task),
-      username: username || null,
-      reward_amount: reward_amount !== undefined ? parseFloat(reward_amount) : null,
-      metadata: { source: 'web' },
-      created_at: nowISO
-    };
-    await supabaseFetch('telegram_gifts', 'POST', taskRecord, '?select=user_id');
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method;
 
-    // optionally update user's last_claim_date / last_activity
+    if (method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405);
+
+    let body = {};
     try {
-      await supabaseFetch('users', 'PATCH', { last_activity: nowISO }, `?id=eq.${id}`);
-    } catch (_) { /* non-fatal */ }
-
-    return sendJSON(res, 200, { ok: true, data: { task, user_id: id, created_at: nowISO } });
-  } catch (err) {
-    console.error('handleClaimTask error:', err.message || err);
-    return sendJSON(res, 500, { ok: false, error: 'Claim task failed: ' + (err.message || 'Supabase error') });
-  }
-}
-
-// -------------------- Main Handler --------------------
-module.exports = async (req, res) => {
-  // Basic CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return sendJSON(res, 200, { ok: true });
-  if (req.method !== 'POST') return sendJSON(res, 405, { ok: false, error: `Method ${req.method} not allowed` });
-
-  let body = {};
-  try { body = await parseBody(req); } catch (err) { return sendJSON(res, 400, { ok: false, error: err.message }); }
-
-  const rawPath = (req.url || '/').split('?')[0];
-  const normalized = rawPath.replace(/^\/+|\/+$/g, '');
-  const route = normalized.split('/').pop() || '';
-
-  try {
-    switch (route) {
-      case 'register':        return await handleRegister(req, res, body);
-      case 'invite-stats':    return await handleInviteStats(req, res, body);
-      case 'claim':           return await handleClaim(req, res, body);
-      case 'claim-task':      return await handleClaimTask(req, res, body);
-      default: return sendJSON(res, 404, { ok: false, error: 'Unknown endpoint', route });
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: 'invalid json' }, 400);
     }
-  } catch (err) {
-    console.error('Unhandled error:', err && err.stack ? err.stack : err);
-    return sendJSON(res, 500, { ok: false, error: 'Internal server error' });
+
+    if (path === '/api/register') {
+      const res = await registerUser(body);
+      return jsonResponse(res, res.ok ? 200 : 400);
+    }
+
+    if (path === '/api/invite-stats') {
+      const stats = await getInviteStats(body.userId);
+      return jsonResponse(stats);
+    }
+
+    if (path === '/api/claim') {
+      const res = await claimGift(body);
+      return jsonResponse(res, res.ok ? 200 : 400);
+    }
+
+    if (path === '/api/claim-task') {
+      const res = await claimTask(body);
+      return jsonResponse(res, res.ok ? 200 : 400);
+    }
+
+    return jsonResponse({ error: 'not found' }, 404);
   }
 };
