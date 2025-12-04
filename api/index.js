@@ -1,188 +1,377 @@
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// api/index.js
+// Fixed/updated: ensure Telegram initData verification works in both Node.js and
+// Cloudflare Workers (Web Crypto) environments, and avoid reading BOT token at
+// module-load time (which caused verification to fail -> 403).
+//
+// Notes:
+// - Make sure to set environment variables in your deployment:
+//   NEXT_PUBLIC_SUPABASE_URL
+//   NEXT_PUBLIC_SUPABASE_ANON_KEY
+//   BOT_TOKEN
+// - When deploying to Cloudflare Workers / Pages Functions, the env object
+//   provided to `fetch(request, env)` is used to populate process.env before
+//   handling the request (so handlers read the correct values).
+//
+// Main fixes:
+// 1) verifyTelegramInitData is now async and supports Node's crypto and Web Crypto.
+// 2) Do NOT capture BOT_TOKEN at module load time. Read process.env inside fetch().
+// 3) All handlers now await verification when required.
+// 4) supabaseRequest reads credentials at call-time from process.env so the env
+//    mapping done in fetch() is effective.
 
-const BOT_TOKEN = Deno.env.get('BOT_TOKEN');
-
-// استخدام التشفير الشامل (يعمل على Node.js و Browsers/Workers)
-// بما أننا نعمل في Deno/Supabase، يجب استخدام globalThis.crypto
-// ولكن وظيفة التحقق القديمة لن تعمل بدون إعادة كتابة جذرية.
-// بما أنك طلبت إزالة التحقق الصارم، لن نعتمد على هذه الدوال.
-
-/*
-// الدالة الأصلية للتحقق (ملاحظة: تم تخطيها الآن)
-function verifyTelegramInitData(initData, token) {
-  // ... (الدالة هنا)
-  return true; // نتركها هنا لكننا لا نستخدمها بشكل صارم
+let nodeCrypto = null;
+try {
+  nodeCrypto = require('crypto');
+} catch (e) {
+  nodeCrypto = null;
+  // This is expected in Cloudflare Workers where require('crypto') is not available.
 }
-*/
 
-// الدوال المساعدة للعمليات
-// -------------------------------------------------------------
+/*********************************************
+ * Async verification of Telegram initData
+ * Supports Node crypto (sync) and Web Crypto (async)
+ *********************************************/
+async function verifyTelegramInitData(initData, token) {
+  if (!initData || !token) return false;
 
-// 2. type: 'set-user' - تسجيل المستخدم
-async function setUser({ userId, username, first_name, last_name, refal_by }) {
-  if (!userId) return { ok: false, error: 'Missing userId' };
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    if (!hash) return false;
+    params.delete('hash');
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL'),
-    Deno.env.get('SUPABASE_ANON_KEY')
-  );
+    const sorted = Array.from(params.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    const dataCheckString = sorted.map(([k, v]) => `${k}=${v}`).join('\n');
 
-  const { data: existingUser } = await supabase
-    .from('telegram_log')
-    .select('user_id')
-    .eq('user_id', userId)
-    .single();
+    // If Node crypto is available, use it (synchronous)
+    if (nodeCrypto && typeof nodeCrypto.createHmac === 'function') {
+      // secret = HMAC_SHA256(key='WebAppData', msg=token)
+      const secret = nodeCrypto.createHmac('sha256', 'WebAppData').update(token).digest();
+      const calculatedHash = nodeCrypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+      return calculatedHash === hash;
+    }
 
-  if (existingUser) {
-    return { ok: true, message: 'User already exists', data: existingUser };
+    // Otherwise use Web Crypto (SubtleCrypto) - async
+    if (globalThis.crypto && globalThis.crypto.subtle) {
+      const encoder = new TextEncoder();
+
+      // helper: compute HMAC-SHA256 with given keyBytes and message => Uint8Array
+      async function hmacSha256Raw(keyBytes, messageBytes) {
+        const key = await globalThis.crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'HMAC', hash: { name: 'SHA-256' } },
+          false,
+          ['sign']
+        );
+        const sig = await globalThis.crypto.subtle.sign('HMAC', key, messageBytes);
+        return new Uint8Array(sig);
+      }
+
+      // secret = HMAC_SHA256(key='WebAppData', msg=token)
+      const keyBytes = encoder.encode('WebAppData');
+      const tokenBytes = encoder.encode(token);
+      const secretBytes = await hmacSha256Raw(keyBytes, tokenBytes);
+
+      // data HMAC using secretBytes as key
+      const dataBytes = encoder.encode(dataCheckString);
+      const dataHmacBytes = await hmacSha256Raw(secretBytes, dataBytes);
+
+      // hex encode
+      const toHex = (buf) => Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+      const calculatedHex = toHex(dataHmacBytes);
+      return calculatedHex === hash;
+    }
+
+    // No crypto available
+    return false;
+  } catch (err) {
+    console.error('verifyTelegramInitData error:', err && err.message ? err.message : err);
+    return false;
   }
+}
 
-  const user = {
-    user_id: userId,
-    username: username || null,
-    first_name: first_name || null,
-    last_name: last_name || null,
-    refal_by: refal_by || null,
+/*********************************************
+ * Supabase helper - reads env at call-time
+ *********************************************/
+async function supabaseRequest(method, path, body = null, headers = {}) {
+  const SUPABASE_URL = (process && process.env && process.env.NEXT_PUBLIC_SUPABASE_URL) || null;
+  const SUPABASE_ANON_KEY = (process && process.env && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) || null;
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return { ok: false, status: 500, error: 'Supabase credentials missing' };
+  }
+  const url = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1${path}`;
+  const defaultHeaders = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
   };
+  const options = {
+    method,
+    headers: { ...defaultHeaders, ...headers }
+  };
+  if (body) options.body = JSON.stringify(body);
 
-  const { data, error } = await supabase.from('telegram_log').insert([user]).select();
-
-  if (error) {
-    console.error('Error inserting user:', error);
-    return { ok: false, error: error.message };
-  }
-
-  if (refal_by) {
-    await supabase.rpc('increment_invites', { inviter_id: refal_by });
-  }
-
-  return { ok: true, data: data[0] };
+  const res = await fetch(url, options);
+  if (res.status === 204) return { ok: true, status: 204, data: null };
+  const data = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, data };
 }
 
-// 3. type: 'watch-ad' - تسجيل مشاهدة إعلان وإنقاص العداد
-async function watchAd({ gift, userId }) {
-  // ⛔️ تمت إزالة التحقق الأمني هنا لتجنب خطأ 403
-  
-  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
+/*********************************************
+ * JSON response helper
+ *********************************************/
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL'),
-    Deno.env.get('SUPABASE_ANON_KEY')
+/*********************************************
+ * Handlers (async)
+ *********************************************/
+
+// 1. register
+async function registerUser(payload) {
+  if (!payload.userId) return { ok: false, error: 'userId required' };
+
+  // Try to verify initData, but don't block registration on verification failure.
+  try {
+    const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
+    if (!botToken || !(await verifyTelegramInitData(payload.initData, botToken))) {
+      // Log warning but continue registration. (If you want to strictly block,
+      // change behavior to return 403 here.)
+      console.warn(`Registration: InitData verification failed for user ${payload.userId}`);
+    }
+  } catch (e) {
+    console.warn('Registration verification error:', e && e.message ? e.message : e);
+  }
+
+  // check existing
+  const { ok: checkOk, data: checkData } = await supabaseRequest(
+    'GET',
+    `/telegram.log?select=user_id&user_id=eq.${payload.userId}`
+  );
+  if (checkOk && Array.isArray(checkData) && checkData.length > 0) {
+    return { ok: true, message: 'User already exists' };
+  }
+
+  const { ok, data } = await supabaseRequest(
+    'POST',
+    '/telegram.log',
+    {
+      user_id: String(payload.userId),
+      username: payload.username || '',
+      first_name: payload.firstName || '',
+      last_name: payload.lastName || '',
+      refal_by: payload.refal_by ? String(payload.refal_by) : null,
+      created_at: new Date().toISOString()
+    },
+    { 'Prefer': 'return=representation' }
   );
 
-  const columnToDecrement = `ads_${gift}`;
-  const { data, error } = await supabase.rpc('decrement_ad_count', {
-    user_id_param: userId,
-    column_name: columnToDecrement,
-  });
+  if (!ok) return { ok: false, error: data?.message || 'Insert failed' };
+  return { ok: true, data };
+}
 
-  if (error) {
-    console.error('Error decrementing ad count:', error);
-    return { ok: false, error: error.message };
+// 2. invite-stats
+async function getInviteStats(userId) {
+  if (!userId) return { total: 0, active: 0, pending: 0 };
+
+  const { ok, data } = await supabaseRequest(
+    'GET',
+    `/telegram.log?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
+  );
+  if (!ok || !Array.isArray(data) || data.length === 0) {
+    return { total: 0, active: 0, pending: 0 };
   }
+  const row = data[0];
+  return {
+    total: row.invites_total || 0,
+    active: row.invites_active || 0,
+    pending: row.invites_pending || 0
+  };
+}
+
+// 3. watch-ad
+async function watchAd({ gift, userId, initData }) {
+  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
+  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
+    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
+  }
+
+  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
+
+  const adsCol = `ads_${gift}`;
+  const now = new Date().toISOString();
+
+  // Decrement via PATCH with SQL expression (Supabase allows the column = column - 1)
+  const { ok, data, status } = await supabaseRequest(
+    'PATCH',
+    `/telegram.log?user_id=eq.${userId}&${adsCol}=gt.0`,
+    {
+      [adsCol]: `telegram.log.${adsCol} - 1`,
+      updated_at: now
+    },
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
+  );
+
+  if (status === 404 || (ok && data && data.length === 0)) {
+    return { ok: true, message: 'Ad count already zero or user not found' };
+  }
+  if (!ok) return { ok: false, error: data?.message || 'Ad count update failed' };
 
   return { ok: true, data };
 }
 
-// 4. type: 'claim' - المطالبة بهدية
-async function claimGift({ gift, userId, username }) {
-  // ⛔️ تمت إزالة التحقق الأمني هنا لتجنب خطأ 403
-  
-  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL'),
-    Deno.env.get('SUPABASE_ANON_KEY')
-  );
-
-  const { data, error } = await supabase.rpc('claim_gift_procedure', {
-    gift_type: gift,
-    claimer_id: userId,
-  });
-
-  if (error) {
-    console.error('Error claiming gift:', error);
-    return { ok: false, error: error.message };
+// 4. claim gift
+async function claimGift({ gift, userId, username, initData }) {
+  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
+  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
+    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
 
-  return { ok: true, data };
+  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
+
+  const now = new Date().toISOString();
+  const giftCol = `gifts_${gift}`;
+  const canCol = `can_claim_${gift}`;
+  const adsCol = `ads_${gift}`;
+
+  const { ok: updOk, data: updData, status: updStatus } = await supabaseRequest(
+    'PATCH',
+    `/telegram.log?user_id=eq.${userId}`,
+    {
+      [adsCol]: 0,
+      [canCol]: false,
+      last_claim_at: now,
+      updated_at: now
+    },
+    { 'Prefer': 'return=representation' }
+  );
+  if (!updOk) return { ok: false, error: updData?.message || `Step 1 failed (${updStatus})` };
+
+  const { ok: incOk, data: incData, status: incStatus } = await supabaseRequest(
+    'PATCH',
+    `/telegram.log?user_id=eq.${userId}`,
+    {
+      [giftCol]: `telegram.log.${giftCol} + 1`
+    },
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
+  );
+  if (!incOk) return { ok: false, error: incData?.message || `Step 2 failed (${incStatus})` };
+
+  return { ok: true, data: incData };
 }
 
-// 5. type: 'claim-task' - المطالبة بهدية المهمة
-async function claimTask({ task, userId, username }) {
-  // ⛔️ تمت إزالة التحقق الأمني هنا لتجنب خطأ 403
+// 5. claim-task
+async function claimTask({ task, userId, username, initData }) {
+  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
+  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
+    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
+  }
 
   if (task !== 'bear' || !userId) return { ok: false, error: 'Invalid task or userId' };
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL'),
-    Deno.env.get('SUPABASE_ANON_KEY')
+  const now = new Date().toISOString();
+
+  const { ok, data } = await supabaseRequest(
+    'PATCH',
+    `/telegram.log?user_id=eq.${userId}`,
+    {
+      gifts_bear: `telegram.log.gifts_bear + 1`,
+      updated_at: now
+    },
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
   );
-
-  const { data, error } = await supabase.rpc('claim_bear_task', {
-    user_id_param: userId,
-  });
-
-  if (error) {
-    console.error('Error claiming bear task:', error);
-    return { ok: false, error: error.message };
-  }
-
+  if (!ok) return { ok: false, error: data?.message || 'Task claim failed' };
   return { ok: true, data };
 }
 
-// المعالج الرئيسي
-// -------------------------------------------------------------
+/*********************************************
+ * Main fetch handler
+ *********************************************/
+export default {
+  async fetch(request, env) {
+    // Map env variables (from platform) into process.env so helpers can read them.
+    if (env && typeof env === 'object') {
+      global.process = global.process || { env: {} };
+      // Only copy known variables (avoid leaking everything accidentally)
+      if (env.NEXT_PUBLIC_SUPABASE_URL) global.process.env.NEXT_PUBLIC_SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
+      if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY) global.process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (env.BOT_TOKEN) global.process.env.BOT_TOKEN = env.BOT_TOKEN;
+    }
 
-serve(async (req) => {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+    const method = request.method;
 
-  try {
-    const body = await req.json();
-    const { type, ...params } = body;
+    // CORS preflight
+    if (method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        }
+      });
+    }
+
+    if (method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
+
+    let body = {};
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON format' }, 400);
+    }
+
+    const requestType = body.type;
+    if (!requestType) return jsonResponse({ error: 'Missing request type in body' }, 400);
+
     let res;
+    let status = 200;
 
-    switch (type) {
-      case 'set-user':
-        res = await setUser(params);
-        break;
-      case 'watch-ad':
-        res = await watchAd(params);
-        break;
-      case 'claim':
-        res = await claimGift(params);
-        break;
-      case 'claim-task':
-        res = await claimTask(params);
-        break;
-      default:
-        res = { ok: false, error: 'Invalid type provided', status: 400 };
+    try {
+      switch (requestType) {
+        case 'register':
+          res = await registerUser(body);
+          status = res.ok ? 200 : 400;
+          break;
+        case 'invite-stats':
+          res = await getInviteStats(body.userId);
+          status = 200;
+          break;
+        case 'watch-ad':
+          res = await watchAd(body);
+          status = res.ok ? 200 : (res.status || 400);
+          break;
+        case 'claim':
+          res = await claimGift(body);
+          status = res.ok ? 200 : (res.status || 400);
+          break;
+        case 'claim-task':
+          res = await claimTask(body);
+          status = res.ok ? 200 : (res.status || 400);
+          break;
+        default:
+          return jsonResponse({ error: `Unknown request type: ${requestType}` }, 404);
+      }
+    } catch (err) {
+      console.error('Handler error:', err && err.stack ? err.stack : err);
+      return jsonResponse({ ok: false, error: 'Internal server error' }, 500);
     }
 
-    let status = res.status || (res.ok ? 200 : 500);
-
-    // ⚠️ تم إزالة الشرط الخاص بالـ 403:
-    /*
-    if (res.status === 403 || res.error === 'Invalid Telegram Session (initData)') {
-        status = 403;
+    // If handler set a 403-like response inside res
+    if (res && (res.status === 403 || res.error === 'Invalid Telegram Session (initData)')) {
+      status = 403;
     }
-    */
 
-    return new Response(JSON.stringify(res), {
-      status,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    });
-  } catch (error) {
-    console.error('Global error:', error);
-    return new Response(JSON.stringify({ ok: false, error: error.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(res, status);
   }
-});
+};
