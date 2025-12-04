@@ -251,72 +251,16 @@
     const tgUser = tg.initDataUnsafe?.user || null;
 
     /*******************************
-     * وظائف fetch للباكند (نقاط منفصلة)
+     * دالة fetchApi موحدة
      *******************************/
-    async function apiPostWatchAd(gift, userId, initData) {
+    async function fetchApi({ type, data }) {
       try {
-        const res = await fetch('/api/watch-ad', {
+        const res = await fetch('/api', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gift, userId, initData })
+          body: JSON.stringify({ type, ...data })
         });
-        const json = await res.json().catch(()=>null);
-        return { ok: res.ok, status: res.status, data: json };
-      } catch (e) {
-        return { ok: false, error: e.message || String(e) };
-      }
-    }
-
-    async function apiPostClaim(gift, userId, username, initData) {
-      try {
-        const res = await fetch('/api/claim', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gift, userId, username, initData })
-        });
-        const json = await res.json().catch(()=>null);
-        return { ok: res.ok, status: res.status, data: json };
-      } catch (e) {
-        return { ok: false, error: e.message || String(e) };
-      }
-    }
-
-    async function apiPostInviteStats(userId) {
-      try {
-        const res = await fetch('/api/invite-stats', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId })
-        });
-        const json = await res.json().catch(()=>null);
-        return { ok: res.ok, status: res.status, data: json };
-      } catch (e) {
-        return { ok: false, error: e.message || String(e) };
-      }
-    }
-
-    async function apiPostClaimTask(task, userId, username, initData) {
-      try {
-        const res = await fetch('/api/claim-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task, userId, username, initData })
-        });
-        const json = await res.json().catch(()=>null);
-        return { ok: res.ok, status: res.status, data: json };
-      } catch (e) {
-        return { ok: false, error: e.message || String(e) };
-      }
-    }
-
-    async function apiPostRegister(payload) {
-      try {
-        const res = await fetch('/api/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const json = await res.json().catch(()=>null);
+        const json = await res.json().catch(() => null);
         return { ok: res.ok, status: res.status, data: json };
       } catch (e) {
         return { ok: false, error: e.message || String(e) };
@@ -374,9 +318,7 @@
       const onReady = () => {
         if (played) return;
         played = true;
-        // تجربة تشغيل الفيديو، إن رفض المتصفح التشغيل التلقائي نكتفي بعرض صورة الدائرة (الفيديو سيبقى متوقف)
-        loaderVideo.play().catch(()=>{ /* ignore autoplay block */ });
-        // إظهار اللوودر لمدة 7 ثوان (يمكن إلغاؤه عند الحاجة)
+        loaderVideo.play().catch(()=>{});
         setTimeout(() => {
           if (loaderEl) {
             loaderEl.style.display = 'none';
@@ -386,15 +328,11 @@
         }, 7000);
       };
 
-      // إن كان الفيديو جاهزًا الآن
       if (loaderVideo.readyState >= 2) {
         onReady();
       } else {
         loaderVideo.addEventListener('loadeddata', onReady, { once: true });
-        // كـ fallback بعد 3 ثوانٍ إذا لم يُطلق loadeddata
-        setTimeout(() => {
-          if (!played) onReady();
-        }, 3000);
+        setTimeout(() => { if (!played) onReady(); }, 3000);
       }
     }
 
@@ -408,24 +346,18 @@
         videos.forEach(v => { try { v.pause(); } catch(e){} });
         return;
       }
-
       if (videoObserver) videoObserver.disconnect();
-
       videoObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
           const vid = entry.target;
           const isVisible = entry.intersectionRatio >= 0.25;
           if (isVisible) {
-            // فقط شغّل الفيديوهات المصرح لها (data-seq أو data-autoplay)
-            if (vid.dataset.seq || vid.dataset.autoplay) {
-              vid.play().catch(()=>{ /* autoplay blocked */ });
-            }
+            if (vid.dataset.seq || vid.dataset.autoplay) vid.play().catch(()=>{});
           } else {
-            try { vid.pause(); } catch(e){ }
+            try { vid.pause(); } catch(e){}
           }
         });
       }, { threshold: [0.25], rootMargin: "0px 0px -10% 0px" });
-
       videos.forEach(v => videoObserver.observe(v));
     }
 
@@ -437,10 +369,8 @@
         .sort((a,b) => (Number(a.dataset.seq)||0) - (Number(b.dataset.seq)||0));
       for (let i = 0; i < seqVideos.length; i++) {
         const v = seqVideos[i];
-        // تأخير بسيط تدريجي — يقلل الذروة
         await new Promise(res => setTimeout(res, 400 + (i * 150)));
-        // شغل إذا كان مُسموحاً (المراقب سيوقفه إن لم يكن ظاهرًا)
-        try { await v.play(); } catch(e){ /* ignore */ }
+        try { await v.play(); } catch(e){}
       }
     }
 
@@ -448,11 +378,9 @@
      * دوال اد (SDK) — تظهر إعلانًا مكافئًا ومُعالجة المشاهدة
      *******************************/
     function showRewardedAdViaSDK() {
-      // تستخدم الدالة التي وفرتها SDK: show_10245709()
       if (typeof window.show_10245709 === 'function') {
         return window.show_10245709().then(() => true).catch(() => false);
       } else {
-        // محاكاة عند عدم وجود SDK (للاختبار المحلي)
         return new Promise(resolve => setTimeout(() => resolve(true), 1200));
       }
     }
@@ -462,14 +390,11 @@
     async function watchAdForGift(key, btnEl) {
       if (!btnEl) btnEl = document.querySelector(`.ad-btn[data-key="${key}"]`);
       if (!btnEl) return;
-
-      // تجاهل إذا معطّل محليًا
       if (adBtnState[key]) return;
       adBtnState[key] = true;
       btnEl.classList.add('disabled');
       btnEl.setAttribute('aria-disabled', 'true');
 
-      // استدعاء الإعلان مرتين متتاليتين قبل احتساب 1
       let firstOk = false;
       let secondOk = false;
 
@@ -478,7 +403,6 @@
         firstOk = await showRewardedAdViaSDK();
         if (!firstOk) {
           showToast('Ad 1 failed or skipped', 'error', 2500);
-          // إعادة تمكين الزر بعد 2s
           setTimeout(() => {
             adBtnState[key] = false;
             btnEl.classList.remove('disabled');
@@ -511,15 +435,13 @@
 
         // إرسال طلب API لحفظ مشاهدة الإعلان في Supabase
         const userId = tgUser?.id || 'unknown';
-        apiPostWatchAd(key, userId, tg.initData).then(res => {
+        fetchApi({ type: 'watch-ad', data: { gift: key, userId, initData: tg.initData } }).then(res => {
             if (!res.ok) {
-                // قد يكون تحديث العداد في السيرفر فشل، لكن الإعلانات تم احتسابها محليًا
                 showToast('Warning: Failed to save ad count to server. Try claiming later.', 'error', 3500);
             }
         });
 
       } finally {
-        // نعيد تمكين الزر بعد 2 ثانية كحد أدنى لمنع auto-click
         setTimeout(() => {
           adBtnState[key] = false;
           const el = document.querySelector(`.ad-btn[data-key="${key}"]`);
@@ -574,7 +496,7 @@
       const username = getDisplayedUsername();
       const userId   = tgUser?.id || 'unknown';
 
-      const res = await apiPostClaim(gift, userId, username, tg.initData);
+      const res = await fetchApi({ type: 'claim', data: { gift, userId, username, initData: tg.initData } });
       
       if (!res.ok) {
         showToast('Claim request failed. Try again later or check console.', 'error');
@@ -709,7 +631,7 @@
       const link = `https://t.me/${botUsername}/earn?startapp=ref_${userId}`;
       document.getElementById('inviteLink').textContent = link;
 
-      const res = await apiPostInviteStats(userId);
+      const res = await fetchApi({ type: 'invite-stats', data: { userId } });
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
@@ -725,7 +647,7 @@
 
     async function openTaskPage(){
       const userId = tgUser?.id || 'unknown';
-      const res = await apiPostInviteStats(userId);
+      const res = await fetchApi({ type: 'invite-stats', data: { userId } });
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
@@ -773,7 +695,7 @@
 
       const userId = tgUser?.id || 'unknown';
       const username = getDisplayedUsername();
-      const res = await apiPostClaimTask('bear', userId, username, tg.initData);
+      const res = await fetchApi({ type: 'claim-task', data: { task: 'bear', userId, username, initData: tg.initData } });
       
       if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
 
@@ -796,7 +718,7 @@
       updateUsernameDisplay();
       try {
         const userId = tgUser?.id || 'unknown';
-        const res = await apiPostInviteStats(userId);
+        const res = await fetchApi({ type: 'invite-stats', data: { userId } });
         if (res.ok && res.data) {
           inviteStats.total = res.data.total ?? inviteStats.total;
           inviteStats.active = res.data.active ?? inviteStats.active;
@@ -842,7 +764,7 @@
         initData: tg.initData 
       };
       try {
-        const res = await apiPostRegister(payload);
+        const res = await fetchApi({ type: 'register', data: payload });
         if (!res.ok) throw new Error((res.data && res.data.message) || 'Reg failed');
         showToast('Welcome! You are registered.', 'success');
       } catch (e) {
@@ -868,12 +790,10 @@
     document.addEventListener('click', e => {
       if (e.target.classList && e.target.classList.contains('ad-btn')) {
         const key = e.target.dataset.key;
-        // إذا الزر في حالة تعطيل محلي، نتجاهل
         if (adBtnState[key]) {
           e.preventDefault();
           return;
         }
-        // حالة التعطيل يتم التحكم بها في watchAdForGift نفسها
       }
     });
 
