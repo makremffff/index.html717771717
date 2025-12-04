@@ -1,95 +1,11 @@
 // api/index.js
-// Fixed/updated: ensure Telegram initData verification works in both Node.js and
-// Cloudflare Workers (Web Crypto) environments, and avoid reading BOT token at
-// module-load time (which caused verification to fail -> 403).
-//
-// Notes:
-// - Make sure to set environment variables in your deployment:
+// NOTE: initData verification has been removed by request.
+// WARNING: Disabling initData verification reduces security. Do not expose this
+// API publicly without other protections (auth / rate-limit / proper Supabase rules).
+
+// Environment variables used:
 //   NEXT_PUBLIC_SUPABASE_URL
 //   NEXT_PUBLIC_SUPABASE_ANON_KEY
-//   BOT_TOKEN
-// - When deploying to Cloudflare Workers / Pages Functions, the env object
-//   provided to `fetch(request, env)` is used to populate process.env before
-//   handling the request (so handlers read the correct values).
-//
-// Main fixes:
-// 1) verifyTelegramInitData is now async and supports Node's crypto and Web Crypto.
-// 2) Do NOT capture BOT_TOKEN at module load time. Read process.env inside fetch().
-// 3) All handlers now await verification when required.
-// 4) supabaseRequest reads credentials at call-time from process.env so the env
-//    mapping done in fetch() is effective.
-
-let nodeCrypto = null;
-try {
-  nodeCrypto = require('crypto');
-} catch (e) {
-  nodeCrypto = null;
-  // This is expected in Cloudflare Workers where require('crypto') is not available.
-}
-
-/*********************************************
- * Async verification of Telegram initData
- * Supports Node crypto (sync) and Web Crypto (async)
- *********************************************/
-async function verifyTelegramInitData(initData, token) {
-  if (!initData || !token) return false;
-
-  try {
-    const params = new URLSearchParams(initData);
-    const hash = params.get('hash');
-    if (!hash) return false;
-    params.delete('hash');
-
-    const sorted = Array.from(params.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    const dataCheckString = sorted.map(([k, v]) => `${k}=${v}`).join('\n');
-
-    // If Node crypto is available, use it (synchronous)
-    if (nodeCrypto && typeof nodeCrypto.createHmac === 'function') {
-      // secret = HMAC_SHA256(key='WebAppData', msg=token)
-      const secret = nodeCrypto.createHmac('sha256', 'WebAppData').update(token).digest();
-      const calculatedHash = nodeCrypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
-      return calculatedHash === hash;
-    }
-
-    // Otherwise use Web Crypto (SubtleCrypto) - async
-    if (globalThis.crypto && globalThis.crypto.subtle) {
-      const encoder = new TextEncoder();
-
-      // helper: compute HMAC-SHA256 with given keyBytes and message => Uint8Array
-      async function hmacSha256Raw(keyBytes, messageBytes) {
-        const key = await globalThis.crypto.subtle.importKey(
-          'raw',
-          keyBytes,
-          { name: 'HMAC', hash: { name: 'SHA-256' } },
-          false,
-          ['sign']
-        );
-        const sig = await globalThis.crypto.subtle.sign('HMAC', key, messageBytes);
-        return new Uint8Array(sig);
-      }
-
-      // secret = HMAC_SHA256(key='WebAppData', msg=token)
-      const keyBytes = encoder.encode('WebAppData');
-      const tokenBytes = encoder.encode(token);
-      const secretBytes = await hmacSha256Raw(keyBytes, tokenBytes);
-
-      // data HMAC using secretBytes as key
-      const dataBytes = encoder.encode(dataCheckString);
-      const dataHmacBytes = await hmacSha256Raw(secretBytes, dataBytes);
-
-      // hex encode
-      const toHex = (buf) => Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
-      const calculatedHex = toHex(dataHmacBytes);
-      return calculatedHex === hash;
-    }
-
-    // No crypto available
-    return false;
-  } catch (err) {
-    console.error('verifyTelegramInitData error:', err && err.message ? err.message : err);
-    return false;
-  }
-}
 
 /*********************************************
  * Supabase helper - reads env at call-time
@@ -134,25 +50,14 @@ function jsonResponse(obj, status = 200) {
 }
 
 /*********************************************
- * Handlers (async)
+ * Handlers (verification REMOVED)
  *********************************************/
 
 // 1. register
 async function registerUser(payload) {
   if (!payload.userId) return { ok: false, error: 'userId required' };
 
-  // Try to verify initData, but don't block registration on verification failure.
-  try {
-    const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
-    if (!botToken || !(await verifyTelegramInitData(payload.initData, botToken))) {
-      // Log warning but continue registration. (If you want to strictly block,
-      // change behavior to return 403 here.)
-      console.warn(`Registration: InitData verification failed for user ${payload.userId}`);
-    }
-  } catch (e) {
-    console.warn('Registration verification error:', e && e.message ? e.message : e);
-  }
-
+  // NOTE: initData verification removed. We still allow registration attempt.
   // check existing
   const { ok: checkOk, data: checkData } = await supabaseRequest(
     'GET',
@@ -199,13 +104,9 @@ async function getInviteStats(userId) {
   };
 }
 
-// 3. watch-ad
+// 3. watch-ad (no initData verification)
 async function watchAd({ gift, userId, initData }) {
-  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
-  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
-    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
-  }
-
+  // verification removed intentionally
   if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
 
   const adsCol = `ads_${gift}`;
@@ -230,20 +131,16 @@ async function watchAd({ gift, userId, initData }) {
   return { ok: true, data };
 }
 
-// 4. claim gift
+// 4. claim gift (no initData verification)
 async function claimGift({ gift, userId, username, initData }) {
-  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
-  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
-    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
-  }
-
   if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
 
   const now = new Date().toISOString();
-  const giftCol = `gifts_${gift}`;
-  const canCol = `can_claim_${gift}`;
-  const adsCol = `ads_${gift}`;
+  const giftCol = `gifts_${gift}`;        
+  const canCol = `can_claim_${gift}`;     
+  const adsCol = `ads_${gift}`;           
 
+  // 1. تصفير العداد، إغلاق إمكانية السحب، تحديث تاريخ آخر سحب
   const { ok: updOk, data: updData, status: updStatus } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -257,6 +154,7 @@ async function claimGift({ gift, userId, username, initData }) {
   );
   if (!updOk) return { ok: false, error: updData?.message || `Step 1 failed (${updStatus})` };
 
+  // 2. زيادة عدد الهدايا بـ +1 باستخدام دالة SQL
   const { ok: incOk, data: incData, status: incStatus } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -270,13 +168,8 @@ async function claimGift({ gift, userId, username, initData }) {
   return { ok: true, data: incData };
 }
 
-// 5. claim-task
+// 5. claim-task (no initData verification)
 async function claimTask({ task, userId, username, initData }) {
-  const botToken = (process && process.env && process.env.BOT_TOKEN) || null;
-  if (!botToken || !(await verifyTelegramInitData(initData, botToken))) {
-    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
-  }
-
   if (task !== 'bear' || !userId) return { ok: false, error: 'Invalid task or userId' };
 
   const now = new Date().toISOString();
@@ -302,10 +195,8 @@ export default {
     // Map env variables (from platform) into process.env so helpers can read them.
     if (env && typeof env === 'object') {
       global.process = global.process || { env: {} };
-      // Only copy known variables (avoid leaking everything accidentally)
       if (env.NEXT_PUBLIC_SUPABASE_URL) global.process.env.NEXT_PUBLIC_SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
       if (env.NEXT_PUBLIC_SUPABASE_ANON_KEY) global.process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (env.BOT_TOKEN) global.process.env.BOT_TOKEN = env.BOT_TOKEN;
     }
 
     const method = request.method;
@@ -365,11 +256,6 @@ export default {
     } catch (err) {
       console.error('Handler error:', err && err.stack ? err.stack : err);
       return jsonResponse({ ok: false, error: 'Internal server error' }, 500);
-    }
-
-    // If handler set a 403-like response inside res
-    if (res && (res.status === 403 || res.error === 'Invalid Telegram Session (initData)')) {
-      status = 403;
     }
 
     return jsonResponse(res, status);
