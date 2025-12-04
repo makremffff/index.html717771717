@@ -1,31 +1,44 @@
 // api/index.js
 // Hybrid REST + Client-Side Logic WebApp API
-// يعمل على Cloudflare Pages Functions أو أي serverless يدعم file-system routing
+// يعمل على Cloudflare Pages Functions أو Vercel Functions
 // يعتمد على المتغيرات البيئية:
 //   NEXT_PUBLIC_SUPABASE_URL
 //   NEXT_PUBLIC_SUPABASE_ANON_KEY
 //   BOT_TOKEN
-// ويتعامل مع جدول واحد فقط: telegram.log
 
+// يجب أن تكون المتغيرات البيئية متاحة
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN; 
 
-// Modification: Implement check for initData
+// يتم استدعاء مكتبة التشفير (crypto) هنا
+let crypto;
+try {
+  crypto = require('crypto');
+} catch (e) {
+  // للبيئات التي لا تدعم require (مثل Cloudflare Workers)
+  // يجب استخدام Web Crypto API بدلاً من ذلك، لكن نفترض Node.js حالياً
+  console.warn("Node.js 'crypto' module not available. InitData verification will fail if not using Node.js environment.");
+  // يمكن إضافة كود fallback لـ Cloudflare هنا إذا لزم الأمر
+}
+
+/*********************************************
+ * وظيفة التحقق الأمني من Telegram InitData
+ *********************************************/
 function verifyTelegramInitData(initData, token) {
-  if (!initData) return false;
+  if (!initData || !crypto) return false;
   try {
     const data = new URLSearchParams(initData);
     const hash = data.get('hash');
     data.delete('hash');
     
-    // يحتاج بيئة Node.js أو Cloudflare Workers (للوصول إلى crypto)
-    const crypto = require('crypto'); 
-
+    // ترتيب البيانات أبجديًا
     const params = Array.from(data.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const dataCheckString = params.map(([key, value]) => `${key}=${value}`).join('\n');
 
+    // حساب المفتاح السري
     const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
+    // حساب الهاش باستخدام المفتاح السري
     const calculatedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
 
     return calculatedHash === hash;
@@ -35,7 +48,13 @@ function verifyTelegramInitData(initData, token) {
   }
 }
 
+/*********************************************
+ * وظيفة المراسلة مع Supabase
+ *********************************************/
 async function supabaseRequest(method, path, body = null, headers = {}) {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return { ok: false, status: 500, error: 'Supabase credentials missing' };
+  }
   const url = `${SUPABASE_URL}/rest/v1${path}`;
   const defaultHeaders = {
     'apikey': SUPABASE_ANON_KEY,
@@ -55,31 +74,45 @@ async function supabaseRequest(method, path, body = null, headers = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
+/*********************************************
+ * وظيفة إنشاء استجابة JSON
+ *********************************************/
 function jsonResponse(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 
+      'Content-Type': 'application/json',
+      // السماح بالوصول من أي مكان إذا كنت تستخدم Vercel أو Cloudflare
+      'Access-Control-Allow-Origin': '*' 
+    }
   });
 }
 
-// مسار: type: 'register'
+/*********************************************
+ * معالجات أنواع الطلبات (Request Handlers)
+ *********************************************/
+
+// 1. type: 'register' - تسجيل المستخدم أو التحقق من وجوده
 async function registerUser(payload) {
   if (!payload.userId) return { ok: false, error: 'userId required' };
 
+  // التحقق الأمني: مطلوب للطلبات التي تأتي من واجهة المستخدم
   if (!BOT_TOKEN || !verifyTelegramInitData(payload.initData, BOT_TOKEN)) {
-    // التحقق الأمني: لا يمنع التسجيل، لكن يجب تسجيل تحذير في اللوغز.
+    // التحقق من initData مطلوب ولكن لا يمنع التسجيل، فقط يسجل تحذير
+    // console.warn(`Registration attempt failed InitData verification for user ${payload.userId}`);
   }
 
-  // Check if user already exists
-  const { ok: checkOk, status: checkStatus, data: checkData } = await supabaseRequest(
+  // تحقق من وجود المستخدم مسبقاً
+  const { ok: checkOk, data: checkData } = await supabaseRequest(
     'GET',
     `/telegram.log?select=user_id&user_id=eq.${payload.userId}`
   );
   if (checkOk && Array.isArray(checkData) && checkData.length > 0) {
-    return { ok: true, message: 'already exists' };
+    return { ok: true, message: 'User already exists' };
   }
 
-  const { ok, status, data } = await supabaseRequest(
+  // إدخال مستخدم جديد
+  const { ok, data } = await supabaseRequest(
     'POST',
     '/telegram.log',
     {
@@ -93,18 +126,18 @@ async function registerUser(payload) {
     { 'Prefer': 'return=representation' }
   );
 
-  if (status === 409) return { ok: true, message: 'already exists' };
-  if (!ok) return { ok: false, error: data?.message || 'insert failed' };
+  if (!ok) return { ok: false, error: data?.message || 'Insert failed' };
   return { ok: true, data };
 }
 
-// مسار: type: 'invite-stats'
+// 2. type: 'invite-stats' - جلب إحصائيات الدعوات
 async function getInviteStats(userId) {
   const { ok, data } = await supabaseRequest(
     'GET',
     `/telegram.log?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
   );
   if (!ok || !Array.isArray(data) || data.length === 0) {
+    // إذا لم يتم العثور على المستخدم، نرجع صفر
     return { total: 0, active: 0, pending: 0 };
   }
   const row = data[0];
@@ -115,45 +148,54 @@ async function getInviteStats(userId) {
   };
 }
 
-// 💡 الدالة الجديدة: مسار: type: 'watch-ad'
+// 3. type: 'watch-ad' - تسجيل مشاهدة إعلان وإنقاص العداد
 async function watchAd({ gift, userId, initData }) {
+  // التحقق الأمني الصارم: نرفض الطلب إذا فشل التحقق
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
     return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
   
+  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
+
   const adsCol = `ads_${gift}`;
   const now = new Date().toISOString();
   
-  // ننقص العداد بواحد (مشاهدة إعلانين = خصم 1 من العداد)
-  const { ok, data } = await supabaseRequest(
+  // لإنقاص قيمة رقمية في Supabase تحتاج إلى استخدام دالة SQL
+  const { ok, data, status } = await supabaseRequest(
     'PATCH',
-    `/telegram.log?user_id=eq.${userId}&${adsCol}=gt.0`, // تأكد من أن العداد أكبر من صفر
+    `/telegram.log?user_id=eq.${userId}&${adsCol}=gt.0`, 
     {
       [adsCol]: `telegram.log.${adsCol} - 1`,
       updated_at: now
     },
-    // ملاحظة: لزيادة/إنقاص قيمة رقمية في Supabase تحتاج إلى استخدام دالة SQL
-    // هذا الكود يفترض وجود سياسة RLS تسمح بتنفيذ `column = column - 1`
     { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
   );
-  if (!ok) return { ok: false, error: data?.message || 'ad count update failed' };
+
+  if (status === 404 || (ok && data && data.length === 0)) {
+     // إذا لم يتم تحديث أي صف، فربما يكون العداد وصل للصفر
+     return { ok: true, message: 'Ad count already zero or user not found' };
+  }
+  if (!ok) return { ok: false, error: data?.message || 'Ad count update failed' };
+  
   return { ok: true, data };
 }
 
-// مسار: type: 'claim'
+// 4. type: 'claim' - المطالبة بهدية
 async function claimGift({ gift, userId, username, initData }) {
-  // Security Check - Deny claim if initData is invalid
+  // التحقق الأمني الصارم
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
     return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
+  
+  if (!gift || !userId) return { ok: false, error: 'Missing gift or userId' };
 
   const now = new Date().toISOString();
   const giftCol = `gifts_${gift}`;        
   const canCol = `can_claim_${gift}`;     
   const adsCol = `ads_${gift}`;           
 
-  // أولاً: تصفير عداد الإعلانات وإغلاق إمكانية السحب (can_claim) وتحديث تاريخ السحب
-  const { ok: updOk, data: updData } = await supabaseRequest(
+  // 1. تصفير العداد، إغلاق إمكانية السحب، تحديث تاريخ آخر سحب
+  const { ok: updOk, data: updData, status: updStatus } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
     {
@@ -164,10 +206,10 @@ async function claimGift({ gift, userId, username, initData }) {
     },
     { 'Prefer': 'return=representation' }
   );
-  if (!updOk) return { ok: false, error: updData?.message || 'update failed' };
+  if (!updOk) return { ok: false, error: updData?.message || `Step 1 failed (${updStatus})` };
 
-  // ثانيًا: زيادة عدد الهدايا بـ +1
-  const { ok: incOk, data: incData } = await supabaseRequest(
+  // 2. زيادة عدد الهدايا بـ +1 باستخدام دالة SQL
+  const { ok: incOk, data: incData, status: incStatus } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
     {
@@ -175,21 +217,23 @@ async function claimGift({ gift, userId, username, initData }) {
     },
     { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
   );
-  if (!incOk) return { ok: false, error: incData?.message || 'increment failed' };
+  if (!incOk) return { ok: false, error: incData?.message || `Step 2 failed (${incStatus})` };
 
   return { ok: true, data: incData };
 }
 
-// مسار: type: 'claim-task'
+// 5. type: 'claim-task' - المطالبة بهدية المهمة
 async function claimTask({ task, userId, username, initData }) {
-  // Security Check - Deny claim if initData is invalid
+  // التحقق الأمني الصارم
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
     return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
   
+  if (task !== 'bear' || !userId) return { ok: false, error: 'Invalid task or userId' };
+
   const now = new Date().toISOString();
 
-  // نزيد gifts_bear بـ 1
+  // زيادة gifts_bear بـ 1
   const { ok, data } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -197,17 +241,21 @@ async function claimTask({ task, userId, username, initData }) {
       gifts_bear: `telegram.log.gifts_bear + 1`,
       updated_at: now
     },
-    { 'Prefer': 'return=representation' }
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
   );
-  if (!ok) return { ok: false, error: data?.message || 'task claim failed' };
+  if (!ok) return { ok: false, error: data?.message || 'Task claim failed' };
   return { ok: true, data };
 }
 
-// المُعالج الرئيسي الموحد
+
+/*********************************************
+ * المُعالج الرئيسي (Fetcher)
+ *********************************************/
 export default {
   async fetch(request, env) {
-    // استخراج المتغيرات البيئية
-    if (!SUPABASE_URL) {
+    // ربط المتغيرات البيئية عند العمل في بيئات مثل Cloudflare Workers
+    if (env && env.NEXT_PUBLIC_SUPABASE_URL) {
+      global.process = global.process || { env: {} };
       global.process.env.NEXT_PUBLIC_SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
       global.process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       global.process.env.BOT_TOKEN = env.BOT_TOKEN;
@@ -215,6 +263,18 @@ export default {
 
     const method = request.method;
     
+    // دعم CORS OPTIONS Preflight
+    if (method === 'OPTIONS') {
+        return new Response(null, {
+            status: 204,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+            }
+        });
+    }
+
     if (method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
 
     let body = {};
@@ -224,7 +284,6 @@ export default {
       return jsonResponse({ error: 'Invalid JSON format' }, 400);
     }
     
-    // التحقق من نوع الطلب (type) بدلاً من المسار (path)
     const requestType = body.type;
 
     if (!requestType) {
@@ -243,23 +302,27 @@ export default {
         res = await getInviteStats(body.userId);
         status = 200;
         break;
-      case 'watch-ad': // 💡 المعالج الجديد لعداد الإعلانات
+      case 'watch-ad':
         res = await watchAd(body);
-        status = res.ok ? 200 : 403;
+        status = res.ok ? 200 : (res.status || 400);
         break;
       case 'claim':
         res = await claimGift(body);
-        status = res.ok ? 200 : 403;
+        status = res.ok ? 200 : (res.status || 400);
         break;
       case 'claim-task':
         res = await claimTask(body);
-        status = res.ok ? 200 : 403;
+        status = res.ok ? 200 : (res.status || 400);
         break;
       default:
-        // إذا كان نوع الطلب غير معروف
         return jsonResponse({ error: `Unknown request type: ${requestType}` }, 404);
     }
     
+    // إذا كانت هناك مشكلة في التحقق الأمني، نعيد 403
+    if (res.status === 403 || res.error === 'Invalid Telegram Session (initData)') {
+        status = 403;
+    }
+
     return jsonResponse(res, status);
   }
 };
