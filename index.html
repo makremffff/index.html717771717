@@ -253,7 +253,6 @@
     /*******************************
      * وظائف fetch للباكند (النقطة الموحدة /api/index)
      *******************************/
-    // ✅ الدالة الصحيحة والمحدثة (تتطابق مع طلبك)
     async function apiPost(type, body = {}) {
       try {
         const res = await fetch('/api/index', { 
@@ -314,7 +313,6 @@
 
     /*******************************
      * Loader: تشغيل الفيديو بعد أن يكون جاهزًا لتفادي التهنيج
-     * - ننتظر حدث loadeddata أو canplay ثم نعرض الفيديو ونعرض اللوودر لمدة 7s
      *******************************/
     function showLoaderThenInit() {
       let played = false;
@@ -393,7 +391,6 @@
 
     /*******************************
      * دوال اد (SDK) — تظهر إعلانًا مكافئًا ومُعالجة المشاهدة
-     * - نقوم بطلب عرض الإعلان مرتين قبل خصم 1 من العداد كما طلبت
      *******************************/
     function showRewardedAdViaSDK() {
       // تستخدم الدالة التي وفرتها SDK: show_10245709()
@@ -451,11 +448,20 @@
           showToast('Ad 2 completed', 'success', 1300);
         }
 
-        // كلا الإعلانين نجحا -> ننقص العداد بمقدار 1
+        // كلا الإعلانين نجحا -> ننقص العداد بمقدار 1 (محلياً)
         adCounters[key] = Math.max(0, (adCounters[key] || 1) - 1);
         if (adCounters[key] === 0) canClaim[key] = true;
         renderGiftsRow();
         showToast('Ad views counted. Thank you!', 'success', 2200);
+
+        // 💡 التعديل الجديد: إرسال طلب API لحفظ مشاهدة الإعلان في Supabase
+        const userId = tgUser?.id || 'unknown';
+        apiPost('watch-ad', { gift: key, userId, initData: tg.initData }).then(res => {
+            if (!res.ok) {
+                // قد يكون تحديث العداد في السيرفر فشل، لكن الإعلانات تم احتسابها محليًا
+                showToast('Warning: Failed to save ad count to server. Try claiming later.', 'error', 3500);
+            }
+        });
 
       } finally {
         // نعيد تمكين الزر بعد 2 ثانية كحد أدنى لمنع auto-click
@@ -517,7 +523,7 @@
       const res = await apiPost('claim', { gift: gift, userId, username, initData: tg.initData });
       
       if (!res.ok) {
-        showToast('Claim request failed. Try again later.', 'error');
+        showToast('Claim request failed. Try again later or check console.', 'error');
         return;
       }
 
@@ -525,8 +531,10 @@
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       myGiftDates[gift] = dateStr;
-      canClaim[gift] = false;
-      localStorage.setItem('lastClaimDate', now.toISOString());
+      // لا يمكن المطالبة بنفس الهدية مجددًا إلا بعد استيفاء الشروط مرة أخرى
+      canClaim[gift] = false; 
+      // يتم حفظ تاريخ آخر سحب لمنع السحب المتكرر قبل يومين
+      localStorage.setItem('lastClaimDate', now.toISOString()); 
       renderGiftsRow();
       showToast(`🎁 Gift ${d.en} claimed successfully!`, 'success');
 
@@ -552,8 +560,7 @@
     }
 
     /*******************************
-     * بناء واجهة الهدايا — زر CLAIM يبقى كما هو (صغير وطبيعي)
-     * عند الضغط نعرض إشعارات إذا لم تكن الشروط متوفرة
+     * بناء واجهة الهدايا 
      *******************************/
     function renderGiftsRow(){
       const row = document.getElementById('giftsRow');
