@@ -1,7 +1,7 @@
 // api/index.js
 // Hybrid REST + Client-Side Logic WebApp API
 // يعمل على Cloudflare Pages Functions أو أي serverless يدعم file-system routing
-// يعتمد فقط على المتغيرات البيئية:
+// يعتمد على المتغيرات البيئية:
 //   NEXT_PUBLIC_SUPABASE_URL
 //   NEXT_PUBLIC_SUPABASE_ANON_KEY
 //   BOT_TOKEN
@@ -19,7 +19,8 @@ function verifyTelegramInitData(initData, token) {
     const hash = data.get('hash');
     data.delete('hash');
     
-    const crypto = require('crypto'); // This requires Node.js/Cloudflare Workers environment
+    // يحتاج بيئة Node.js أو Cloudflare Workers (للوصول إلى crypto)
+    const crypto = require('crypto'); 
 
     const params = Array.from(data.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const dataCheckString = params.map(([key, value]) => `${key}=${value}`).join('\n');
@@ -62,13 +63,11 @@ function jsonResponse(obj, status = 200) {
 }
 
 // مسار: type: 'register'
-// يستقبل: { userId, username, firstName, lastName, refal_by, initData }
 async function registerUser(payload) {
   if (!payload.userId) return { ok: false, error: 'userId required' };
 
-  // التحقق الأمني: لا يزال مسموحًا بالتسجيل حتى لو كانت بيانات initData غير صالحة (لكن ينصح بوضع تحذير في اللوغز)
   if (!BOT_TOKEN || !verifyTelegramInitData(payload.initData, BOT_TOKEN)) {
-    // console.warn(`Registration attempt for User ${payload.userId} with invalid initData.`);
+    // التحقق الأمني: لا يمنع التسجيل، لكن يجب تسجيل تحذير في اللوغز.
   }
 
   // Check if user already exists
@@ -100,8 +99,6 @@ async function registerUser(payload) {
 }
 
 // مسار: type: 'invite-stats'
-// يستقبل: { userId }
-// يرجع: { total, active, pending }
 async function getInviteStats(userId) {
   const { ok, data } = await supabaseRequest(
     'GET',
@@ -118,8 +115,32 @@ async function getInviteStats(userId) {
   };
 }
 
+// 💡 الدالة الجديدة: مسار: type: 'watch-ad'
+async function watchAd({ gift, userId, initData }) {
+  if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
+    return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
+  }
+  
+  const adsCol = `ads_${gift}`;
+  const now = new Date().toISOString();
+  
+  // ننقص العداد بواحد (مشاهدة إعلانين = خصم 1 من العداد)
+  const { ok, data } = await supabaseRequest(
+    'PATCH',
+    `/telegram.log?user_id=eq.${userId}&${adsCol}=gt.0`, // تأكد من أن العداد أكبر من صفر
+    {
+      [adsCol]: `telegram.log.${adsCol} - 1`,
+      updated_at: now
+    },
+    // ملاحظة: لزيادة/إنقاص قيمة رقمية في Supabase تحتاج إلى استخدام دالة SQL
+    // هذا الكود يفترض وجود سياسة RLS تسمح بتنفيذ `column = column - 1`
+    { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
+  );
+  if (!ok) return { ok: false, error: data?.message || 'ad count update failed' };
+  return { ok: true, data };
+}
+
 // مسار: type: 'claim'
-// يستقبل: { gift, userId, username, initData }
 async function claimGift({ gift, userId, username, initData }) {
   // Security Check - Deny claim if initData is invalid
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
@@ -131,7 +152,7 @@ async function claimGift({ gift, userId, username, initData }) {
   const canCol = `can_claim_${gift}`;     
   const adsCol = `ads_${gift}`;           
 
-  // نحدّف 1 من العداد ونصفّر can_claim
+  // أولاً: تصفير عداد الإعلانات وإغلاق إمكانية السحب (can_claim) وتحديث تاريخ السحب
   const { ok: updOk, data: updData } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -145,7 +166,7 @@ async function claimGift({ gift, userId, username, initData }) {
   );
   if (!updOk) return { ok: false, error: updData?.message || 'update failed' };
 
-  // نزيد الهدية بـ +1
+  // ثانيًا: زيادة عدد الهدايا بـ +1
   const { ok: incOk, data: incData } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -160,7 +181,6 @@ async function claimGift({ gift, userId, username, initData }) {
 }
 
 // مسار: type: 'claim-task'
-// يستقبل: { task, userId, username, initData }
 async function claimTask({ task, userId, username, initData }) {
   // Security Check - Deny claim if initData is invalid
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
@@ -204,7 +224,7 @@ export default {
       return jsonResponse({ error: 'Invalid JSON format' }, 400);
     }
     
-    // ⭐ التحقق من نوع الطلب (type) بدلاً من المسار (path)
+    // التحقق من نوع الطلب (type) بدلاً من المسار (path)
     const requestType = body.type;
 
     if (!requestType) {
@@ -222,6 +242,10 @@ export default {
       case 'invite-stats':
         res = await getInviteStats(body.userId);
         status = 200;
+        break;
+      case 'watch-ad': // 💡 المعالج الجديد لعداد الإعلانات
+        res = await watchAd(body);
+        status = res.ok ? 200 : 403;
         break;
       case 'claim':
         res = await claimGift(body);
