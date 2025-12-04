@@ -251,15 +251,70 @@
     const tgUser = tg.initDataUnsafe?.user || null;
 
     /*******************************
-     * وظائف fetch للباكند (النقطة الموحدة /api/index)
+     * وظائف fetch للباكند (نقاط منفصلة)
      *******************************/
-    async function apiPost(type, body = {}) {
+    async function apiPostWatchAd(gift, userId, initData) {
       try {
-        const res = await fetch('/api/index', { 
+        const res = await fetch('/api/watch-ad', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // نمرر type ضمن body (مع باقي البيانات)
-          body: JSON.stringify({ type, ...body })
+          body: JSON.stringify({ gift, userId, initData })
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
+
+    async function apiPostClaim(gift, userId, username, initData) {
+      try {
+        const res = await fetch('/api/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gift, userId, username, initData })
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
+
+    async function apiPostInviteStats(userId) {
+      try {
+        const res = await fetch('/api/invite-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
+
+    async function apiPostClaimTask(task, userId, username, initData) {
+      try {
+        const res = await fetch('/api/claim-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task, userId, username, initData })
+        });
+        const json = await res.json().catch(()=>null);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch (e) {
+        return { ok: false, error: e.message || String(e) };
+      }
+    }
+
+    async function apiPostRegister(payload) {
+      try {
+        const res = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         });
         const json = await res.json().catch(()=>null);
         return { ok: res.ok, status: res.status, data: json };
@@ -454,9 +509,9 @@
         renderGiftsRow();
         showToast('Ad views counted. Thank you!', 'success', 2200);
 
-        // 💡 التعديل الجديد: إرسال طلب API لحفظ مشاهدة الإعلان في Supabase
+        // إرسال طلب API لحفظ مشاهدة الإعلان في Supabase
         const userId = tgUser?.id || 'unknown';
-        apiPost('watch-ad', { gift: key, userId, initData: tg.initData }).then(res => {
+        apiPostWatchAd(key, userId, tg.initData).then(res => {
             if (!res.ok) {
                 // قد يكون تحديث العداد في السيرفر فشل، لكن الإعلانات تم احتسابها محليًا
                 showToast('Warning: Failed to save ad count to server. Try claiming later.', 'error', 3500);
@@ -519,8 +574,7 @@
       const username = getDisplayedUsername();
       const userId   = tgUser?.id || 'unknown';
 
-      // ✅ استخدام apiPost مع type: 'claim'
-      const res = await apiPost('claim', { gift: gift, userId, username, initData: tg.initData });
+      const res = await apiPostClaim(gift, userId, username, tg.initData);
       
       if (!res.ok) {
         showToast('Claim request failed. Try again later or check console.', 'error');
@@ -655,8 +709,7 @@
       const link = `https://t.me/${botUsername}/earn?startapp=ref_${userId}`;
       document.getElementById('inviteLink').textContent = link;
 
-      // ✅ استخدام apiPost مع type: 'invite-stats'
-      const res = await apiPost('invite-stats', { userId });
+      const res = await apiPostInviteStats(userId);
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
@@ -672,8 +725,7 @@
 
     async function openTaskPage(){
       const userId = tgUser?.id || 'unknown';
-      // ✅ استخدام apiPost مع type: 'invite-stats'
-      const res = await apiPost('invite-stats', { userId });
+      const res = await apiPostInviteStats(userId);
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
@@ -721,8 +773,7 @@
 
       const userId = tgUser?.id || 'unknown';
       const username = getDisplayedUsername();
-      // ✅ استخدام apiPost مع type: 'claim-task'
-      const res = await apiPost('claim-task', { task: 'bear', userId, username, initData: tg.initData });
+      const res = await apiPostClaimTask('bear', userId, username, tg.initData);
       
       if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
 
@@ -745,8 +796,7 @@
       updateUsernameDisplay();
       try {
         const userId = tgUser?.id || 'unknown';
-        // ✅ استخدام apiPost مع type: 'invite-stats'
-        const res = await apiPost('invite-stats', { userId });
+        const res = await apiPostInviteStats(userId);
         if (res.ok && res.data) {
           inviteStats.total = res.data.total ?? inviteStats.total;
           inviteStats.active = res.data.active ?? inviteStats.active;
@@ -788,12 +838,11 @@
         firstName: tgUser.first_name || '',
         lastName: tgUser.last_name || '',
         refal_by: ref || 0,
-        // Modification: Send tg.initData for security check on registration
+        // Send tg.initData for security check on registration
         initData: tg.initData 
       };
       try {
-        // ✅ استخدام apiPost مع type: 'register'
-        const res = await apiPost('register', payload);
+        const res = await apiPostRegister(payload);
         if (!res.ok) throw new Error((res.data && res.data.message) || 'Reg failed');
         showToast('Welcome! You are registered.', 'success');
       } catch (e) {
