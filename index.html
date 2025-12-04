@@ -253,12 +253,14 @@
     /*******************************
      * وظائف fetch للباكند
      *******************************/
-    async function apiPost(endpoint, body = {}) {
+    // 💡 تم تعديل الدالة لتأخذ 'type' كمعامل أول وتثبيت المسار على '/api/index.js' (أو استخدم '/api/' إذا كان هو المسار الصحيح للنشر)
+    async function apiPost(type, body = {}) {
       try {
-        const res = await fetch('/api/' + endpoint, {
+        const res = await fetch('/api/index.js', { 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
+          // 💡 إضافة حقل 'type' إلى الـ body
+          body: JSON.stringify({ type: type, ...body })
         });
         const json = await res.json().catch(()=>null);
         return { ok: res.ok, status: res.status, data: json };
@@ -511,7 +513,7 @@
       const username = getDisplayedUsername();
       const userId   = tgUser?.id || 'unknown';
 
-      // Modification: Send tg.initData for security check
+      // 💡 تم تعديل الاستدعاء لتمرير 'claim' كـ type
       const res = await apiPost('claim', { gift: gift, userId, username, initData: tg.initData });
       
       if (!res.ok) {
@@ -646,6 +648,7 @@
       const link = `https://t.me/${botUsername}/earn?startapp=ref_${userId}`;
       document.getElementById('inviteLink').textContent = link;
 
+      // 💡 تم تعديل الاستدعاء لتمرير 'invite-stats' كـ type
       const res = await apiPost('invite-stats', { userId });
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
@@ -662,6 +665,7 @@
 
     async function openTaskPage(){
       const userId = tgUser?.id || 'unknown';
+      // 💡 تم تعديل الاستدعاء لتمرير 'invite-stats' كـ type
       const res = await apiPost('invite-stats', { userId });
       if (res.ok && res.data) {
         inviteStats.total = res.data.total ?? inviteStats.total;
@@ -710,7 +714,7 @@
 
       const userId = tgUser?.id || 'unknown';
       const username = getDisplayedUsername();
-      // Modification: Send tg.initData for security check
+      // 💡 تم تعديل الاستدعاء لتمرير 'claim-task' كـ type
       const res = await apiPost('claim-task', { task: 'bear', userId, username, initData: tg.initData });
       
       if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
@@ -734,6 +738,7 @@
       updateUsernameDisplay();
       try {
         const userId = tgUser?.id || 'unknown';
+        // 💡 تم تعديل الاستدعاء لتمرير 'invite-stats' كـ type
         const res = await apiPost('invite-stats', { userId });
         if (res.ok && res.data) {
           inviteStats.total = res.data.total ?? inviteStats.total;
@@ -780,6 +785,7 @@
         initData: tg.initData 
       };
       try {
+        // 💡 تم تعديل الاستدعاء لتمرير 'register' كـ type
         const res = await apiPost('register', payload);
         if (!res.ok) throw new Error((res.data && res.data.message) || 'Reg failed');
         showToast('Welcome! You are registered.', 'success');
