@@ -4,7 +4,7 @@
 // يعتمد فقط على المتغيرات البيئية:
 //   NEXT_PUBLIC_SUPABASE_URL
 //   NEXT_PUBLIC_SUPABASE_ANON_KEY
-// ويتعامل مع جدول واحد فقط: telegram.logo
+// ويتعامل مع جدول واحد فقط: telegram.log
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -42,7 +42,7 @@ async function registerUser(payload) {
 
   const { ok, status, data } = await supabaseRequest(
     'POST',
-    '/telegram.logo',
+    '/telegram.log',
     {
       user_id: String(payload.userId),
       username: payload.username || '',
@@ -63,10 +63,10 @@ async function registerUser(payload) {
 // يستقبل: { userId }
 // يرجع: { total, active, pending }
 async function getInviteStats(userId) {
-  // نقرأ من نفس الجدول telegram.logo
+  // نقرأ من نفس الجدول telegram.log
   const { ok, data } = await supabaseRequest(
     'GET',
-    `/telegram.logo?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
+    `/telegram.log?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
   );
   if (!ok || !Array.isArray(data) || data.length === 0) {
     return { total: 0, active: 0, pending: 0 };
@@ -92,7 +92,7 @@ async function claimGift({ gift, userId, username }) {
   // نحدّف 1 من العداد ونصفّر can_claim
   const { ok: updOk, data: updData } = await supabaseRequest(
     'PATCH',
-    `/telegram.logo?user_id=eq.${userId}`,
+    `/telegram.log?user_id=eq.${userId}`,
     {
       [adsCol]: 0,
       [canCol]: false,
@@ -106,9 +106,9 @@ async function claimGift({ gift, userId, username }) {
   // نزيد الهدية بـ +1
   const { ok: incOk, data: incData } = await supabaseRequest(
     'PATCH',
-    `/telegram.logo?user_id=eq.${userId}`,
+    `/telegram.log?user_id=eq.${userId}`,
     {
-      [giftCol]: `telegram.logo.${giftCol} + 1`
+      [giftCol]: `telegram.log.${giftCol} + 1`
     },
     { 'Prefer': 'return=representation', 'Content-Type': 'application/json' }
   );
@@ -126,9 +126,9 @@ async function claimTask({ task, userId, username }) {
   // نزيد gifts_bear بـ 1
   const { ok, data } = await supabaseRequest(
     'PATCH',
-    `/telegram.logo?user_id=eq.${userId}`,
+    `/telegram.log?user_id=eq.${userId}`,
     {
-      gifts_bear: `telegram.logo.gifts_bear + 1`,
+      gifts_bear: `telegram.log.gifts_bear + 1`,
       updated_at: now
     },
     { 'Prefer': 'return=representation' }
