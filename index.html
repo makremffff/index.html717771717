@@ -26,11 +26,13 @@
       background:#000;
     }
 
-    /* خلفية ثابتة من صورة Back.png */
-    #bgImage{
+    /* خلفية الفيديو: تُشَغَّل مرة واحدة فقط عند الحاجة لتقليل الضغط */
+    #bgVideo{
       position:fixed;
       inset:0;
-      background: url('Back.png') center/cover no-repeat;
+      width:100%;
+      height:100%;
+      object-fit:cover;
       z-index:-1;
     }
 
@@ -124,7 +126,10 @@
 </head>
 <body>
 
-  <div id="bgImage" aria-hidden="true"></div>
+  <!-- خلفية الفيديو: تُشَغَّل مرة واحدة فقط عند الحاجة لتقليل الضغط -->
+  <video id="bgVideo" muted loop playsinline preload="metadata" style="display:none;">
+    <source src="https://files.catbox.moe/to0dox.mp4" type="video/mp4">
+  </video>
 
   <!-- Loader: فيديو اللودر يُشغّل فقط بعد التأكد من جاهزيته لتجنّب التعليق -->
   <div id="loader" aria-hidden="false">
@@ -156,7 +161,7 @@
   <div class="bottom-bar">
     <button onclick="openMyGiftsPage()">My Gift</button>
     <button onclick="openTaskPage()">Task</button>
-    <button onclick="alert('Add Task clicked')">Add Task</button>
+    <button onclick="alert('Add Task ender dev')">Add Task</button>
     <button onclick="openInvitePage()">Invite Friend</button>
   </div>
 
@@ -244,6 +249,7 @@
     const REQUIRED_ACTIVE_INVITES = 10;
     const loaderEl = document.getElementById('loader');
     const loaderVideo = document.getElementById('loaderVideo');
+    const bgVideo = document.getElementById('bgVideo');
 
     const tg = window.Telegram?.WebApp || {};
     const tgUser = tg.initDataUnsafe?.user || null;
@@ -748,6 +754,10 @@
 
       // تشغيل فيديوات الدوائر واحدًا تلو الآخر لتخفيف الحمل
       startCircleVideosSequentially();
+
+      // تشغيل خلفية الفيديو مرة واحدة فقط عند الحاجة
+      bgVideo.style.display = 'block';
+      bgVideo.play().catch(()=>{});
     }
 
     function getRefParam() {
