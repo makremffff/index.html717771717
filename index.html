@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-  <!-- SDK: انسخته كما طلبت لتفعيل الإعلانات -->
   <script src="//libtl.com/sdk.js" data-zone="10245709" data-sdk="show_10245709"></script>
 
   <style>
@@ -126,12 +125,10 @@
 </head>
 <body>
 
-  <!-- خلفية الفيديو: تُشَغَّل مرة واحدة فقط عند الحاجة لتقليل الضغط -->
   <video id="bgVideo" muted loop playsinline preload="metadata" style="display:none;">
     <source src="https://files.catbox.moe/to0dox.mp4" type="video/mp4">
   </video>
 
-  <!-- Loader: فيديو اللودر يُشغّل فقط بعد التأكد من جاهزيته لتجنّب التعليق -->
   <div id="loader" aria-hidden="false">
     <div class="loader-circle" id="loaderCircle">
       <video id="loaderVideo" muted playsinline preload="metadata">
@@ -151,7 +148,6 @@
   <div style="display:flex;flex-direction:column;align-items:center;width:100%;justify-content:center;margin-top:auto;">
     <div id="usernameUnderCircle" class="username-under-circle" title="Click to set username">@unknown</div>
     <div class="video-circle" id="videoCircle">
-      <!-- فيديو الدائرة: لا autoplay في العلامة، سنشغّله متسلسلاً برمجياً -->
       <video muted loop playsinline preload="metadata" data-seq="1">
         <source src="https://files.catbox.moe/sy0jjn.mp4" type="video/mp4">
       </video>
