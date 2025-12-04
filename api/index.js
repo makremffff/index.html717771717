@@ -1,16 +1,14 @@
-
 // api/index.js
 // Hybrid REST + Client-Side Logic WebApp API
 // يعمل على Cloudflare Pages Functions أو أي serverless يدعم file-system routing
 // يعتمد فقط على المتغيرات البيئية:
 //   NEXT_PUBLIC_SUPABASE_URL
 //   NEXT_PUBLIC_SUPABASE_ANON_KEY
-//   BOT_TOKEN (Modification: Added for security check)
+//   BOT_TOKEN
 // ويتعامل مع جدول واحد فقط: telegram.log
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-// Modification: Add BOT_TOKEN for verifying initData
 const BOT_TOKEN = process.env.BOT_TOKEN; 
 
 // Modification: Implement check for initData
@@ -21,10 +19,10 @@ function verifyTelegramInitData(initData, token) {
     const hash = data.get('hash');
     data.delete('hash');
     
+    const crypto = require('crypto'); // This requires Node.js/Cloudflare Workers environment
+
     const params = Array.from(data.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     const dataCheckString = params.map(([key, value]) => `${key}=${value}`).join('\n');
-
-    const crypto = require('crypto'); // This requires Node.js/Cloudflare Workers environment
 
     const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
     const calculatedHash = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
@@ -51,7 +49,6 @@ async function supabaseRequest(method, path, body = null, headers = {}) {
   if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url, options);
-  // Modification: Check for 204 No Content (common in PATCH/DELETE)
   if (res.status === 204) return { ok: true, status: 204, data: null }; 
   const data = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, data };
@@ -64,19 +61,17 @@ function jsonResponse(obj, status = 200) {
   });
 }
 
-// مسار: POST /api/register
+// مسار: type: 'register'
 // يستقبل: { userId, username, firstName, lastName, refal_by, initData }
 async function registerUser(payload) {
   if (!payload.userId) return { ok: false, error: 'userId required' };
 
-  // Modification: Security Check
+  // التحقق الأمني: لا يزال مسموحًا بالتسجيل حتى لو كانت بيانات initData غير صالحة (لكن ينصح بوضع تحذير في اللوغز)
   if (!BOT_TOKEN || !verifyTelegramInitData(payload.initData, BOT_TOKEN)) {
-    // We allow registration even if initData is missing/invalid, but log the invalid state or skip sensitive fields.
-    // For this implementation, we will proceed but log a warning, as registration is non-critical.
     // console.warn(`Registration attempt for User ${payload.userId} with invalid initData.`);
   }
 
-  // Check if user already exists (to prevent 409 error on POST, though Supabase handles 409)
+  // Check if user already exists
   const { ok: checkOk, status: checkStatus, data: checkData } = await supabaseRequest(
     'GET',
     `/telegram.log?select=user_id&user_id=eq.${payload.userId}`
@@ -104,11 +99,10 @@ async function registerUser(payload) {
   return { ok: true, data };
 }
 
-// مسار: POST /api/invite-stats
+// مسار: type: 'invite-stats'
 // يستقبل: { userId }
 // يرجع: { total, active, pending }
 async function getInviteStats(userId) {
-  // نقرأ من نفس الجدول telegram.log
   const { ok, data } = await supabaseRequest(
     'GET',
     `/telegram.log?select=invites_total,invites_active,invites_pending&user_id=eq.${userId}`
@@ -124,20 +118,18 @@ async function getInviteStats(userId) {
   };
 }
 
-// مسار: POST /api/claim
+// مسار: type: 'claim'
 // يستقبل: { gift, userId, username, initData }
-// يُحدّث العداد ويُسجل الهدية
 async function claimGift({ gift, userId, username, initData }) {
-  // Modification: Security Check - Deny claim if initData is invalid
+  // Security Check - Deny claim if initData is invalid
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
     return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
 
-  // أولاً: نتحقق من last_claim_at ونحدّث العداد
   const now = new Date().toISOString();
-  const giftCol = `gifts_${gift}`;        // gifts_bear | gifts_heart | ...
-  const canCol = `can_claim_${gift}`;     // can_claim_bear | ...
-  const adsCol = `ads_${gift}`;           // ads_bear | ...
+  const giftCol = `gifts_${gift}`;        
+  const canCol = `can_claim_${gift}`;     
+  const adsCol = `ads_${gift}`;           
 
   // نحدّف 1 من العداد ونصفّر can_claim
   const { ok: updOk, data: updData } = await supabaseRequest(
@@ -154,9 +146,6 @@ async function claimGift({ gift, userId, username, initData }) {
   if (!updOk) return { ok: false, error: updData?.message || 'update failed' };
 
   // نزيد الهدية بـ +1
-  // Supabase automatically handles incrementing if the column is defined as JSONB or a supported type, 
-  // but for numeric columns, we need to use a function or rely on the framework to generate a raw query.
-  // Assuming 'telegram.log.gifts_bear + 1' works as a raw function call in Supabase RLS context.
   const { ok: incOk, data: incData } = await supabaseRequest(
     'PATCH',
     `/telegram.log?user_id=eq.${userId}`,
@@ -170,11 +159,10 @@ async function claimGift({ gift, userId, username, initData }) {
   return { ok: true, data: incData };
 }
 
-// مسار: POST /api/claim-task
+// مسار: type: 'claim-task'
 // يستقبل: { task, userId, username, initData }
-// يُحدّف المهمة ويزيد gifts_bear
 async function claimTask({ task, userId, username, initData }) {
-  // Modification: Security Check - Deny claim if initData is invalid
+  // Security Check - Deny claim if initData is invalid
   if (!BOT_TOKEN || !verifyTelegramInitData(initData, BOT_TOKEN)) {
     return { ok: false, error: 'Invalid Telegram Session (initData)', status: 403 };
   }
@@ -195,54 +183,59 @@ async function claimTask({ task, userId, username, initData }) {
   return { ok: true, data };
 }
 
-// المُعالج الرئيسي (Cloudflare Pages Functions)
+// المُعالج الرئيسي الموحد
 export default {
   async fetch(request, env) {
-    // استخراج المتغيرات البيئية إذا لم تكن موجودة
+    // استخراج المتغيرات البيئية
     if (!SUPABASE_URL) {
-      // Modification: Read from env object passed to fetch function
       global.process.env.NEXT_PUBLIC_SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
       global.process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      global.process.env.BOT_TOKEN = env.BOT_TOKEN; // Modification: Read BOT_TOKEN
+      global.process.env.BOT_TOKEN = env.BOT_TOKEN;
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname;
     const method = request.method;
     
-    // Modification: Only load crypto module if needed and ensure it works in workers/functions environment
-    // For Cloudflare Workers/Pages Functions, 'crypto' is usually available globally.
-    // If running in Node.js, we would need 'const crypto = require('crypto');' at the top.
-    
-    if (method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405);
+    if (method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405);
 
     let body = {};
     try {
       body = await request.json();
     } catch {
-      return jsonResponse({ error: 'invalid json' }, 400);
+      return jsonResponse({ error: 'Invalid JSON format' }, 400);
+    }
+    
+    // ⭐ التحقق من نوع الطلب (type) بدلاً من المسار (path)
+    const requestType = body.type;
+
+    if (!requestType) {
+        return jsonResponse({ error: 'Missing request type in body' }, 400);
     }
 
-    if (path === '/api/register') {
-      const res = await registerUser(body);
-      return jsonResponse(res, res.ok ? 200 : 400);
-    }
+    let res;
+    let status = 200;
 
-    if (path === '/api/invite-stats') {
-      const stats = await getInviteStats(body.userId);
-      return jsonResponse(stats);
+    switch (requestType) {
+      case 'register':
+        res = await registerUser(body);
+        status = res.ok ? 200 : 400;
+        break;
+      case 'invite-stats':
+        res = await getInviteStats(body.userId);
+        status = 200;
+        break;
+      case 'claim':
+        res = await claimGift(body);
+        status = res.ok ? 200 : 403;
+        break;
+      case 'claim-task':
+        res = await claimTask(body);
+        status = res.ok ? 200 : 403;
+        break;
+      default:
+        // إذا كان نوع الطلب غير معروف
+        return jsonResponse({ error: `Unknown request type: ${requestType}` }, 404);
     }
-
-    if (path === '/api/claim') {
-      const res = await claimGift(body);
-      return jsonResponse(res, res.ok ? 200 : 403); // Modification: Use 403 for failed claims (security)
-    }
-
-    if (path === '/api/claim-task') {
-      const res = await claimTask(body);
-      return jsonResponse(res, res.ok ? 200 : 403); // Modification: Use 403 for failed claims (security)
-    }
-
-    return jsonResponse({ error: 'not found' }, 404);
+    
+    return jsonResponse(res, status);
   }
 };
