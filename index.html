@@ -511,7 +511,9 @@
       const username = getDisplayedUsername();
       const userId   = tgUser?.id || 'unknown';
 
-      const res = await apiPost('claim', { gift: gift, userId, username });
+      // Modification: Send tg.initData for security check
+      const res = await apiPost('claim', { gift: gift, userId, username, initData: tg.initData });
+      
       if (!res.ok) {
         showToast('Claim request failed. Try again later.', 'error');
         return;
@@ -597,7 +599,7 @@
 
     function toDigits(n){
       return String(n).split('').map(ch=>{
-        const map={'0':'𝟶','1':'𝟷','2':'𝟸','3':'𝟹','4':'𝟹','5':'𝟻','6':'𝟼','7':'𝟽','8':'𝟾','9':'𝟿'};
+        const map={'0':'𝟶','1':'𝟷','2':'𝟸','3':'𝟹','4':'𝟺','5':'𝟻','6':'𝟼','7':'𝟽','8':'𝟾','9':'𝟿'};
         return map[ch]||ch;
       }).join('');
     }
@@ -708,7 +710,9 @@
 
       const userId = tgUser?.id || 'unknown';
       const username = getDisplayedUsername();
-      const res = await apiPost('claim-task', { task: 'bear', userId, username });
+      // Modification: Send tg.initData for security check
+      const res = await apiPost('claim-task', { task: 'bear', userId, username, initData: tg.initData });
+      
       if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
 
       myGifts.bear = (myGifts.bear || 0) + 1;
@@ -771,7 +775,9 @@
         username: tgUser.username || '',
         firstName: tgUser.first_name || '',
         lastName: tgUser.last_name || '',
-        refal_by: ref || 0
+        refal_by: ref || 0,
+        // Modification: Send tg.initData for security check on registration
+        initData: tg.initData 
       };
       try {
         const res = await apiPost('register', payload);
