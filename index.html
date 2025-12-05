@@ -54,7 +54,7 @@
     .video-circle{width:125px;height:125px;border-radius:50%;overflow:hidden;box-shadow:0 0 15px rgba(255,255,255,0.1);transform:translateY(-10vh)}
     .video-circle video{width:100%;height:100%;object-fit:cover;background:#000}
     .username-under-circle{margin-top:8px;font-size:16px;color:#fff;font-family:monospace;cursor:pointer;user-select:none}
-    .bottom-bar{width:0%;display:flex;justify-content:center;gap:8px;padding:10px 0;background:#111;border-top:1px solid #222;margin-top:auto; z-index:1;}
+    .bottom-bar{width:100%;display:flex;justify-content:center;gap:8px;padding:10px 0;background:#111;border-top:1px solid #222;margin-top:auto; z-index:1;}
     .bottom-bar button{background:linear-gradient(145deg,#00c6ff,#0072ff);border:1px solid #0059c7;color:#fff;padding:4px 12px;border-radius:12px;font-size:15px;cursor:pointer;box-shadow:2px 2px 6px #000;font-family:monospace;transition:0.2s}
     .bottom-bar button:active{box-shadow:inset 2px 2px 4px #000}
     #myGiftsFullPage,#inviteFullPage,#taskFullPage{position:fixed;inset:0;width:100vw;height:100vh;background:#181828;color:#fff;display:none;z-index:2000;flex-direction:column;align-items:center;justify-content:flex-start;animation:fadeIn .25s}
@@ -276,13 +276,31 @@
       box:   {en:'Box',  ar:'صندوق',icon:'🎁', ads:350, inv:10,img:"https://giftgogame.com/static/thumbnails/5170250947678437525.webp",stars:25},
       rose:  {en:'Rose', ar:'وردة', icon:'🌹', ads:350, inv:20,img:"https://giftgogame.com/static/thumbnails/5168103777563050263.webp",stars:25}
     };
-    let myGifts = { bear:0, heart:0, box:0, rose:0 };
-    let myGiftDates = { bear:null, heart:null, box:null, rose:null };
-    let adCounters = { bear:200, heart:250, box:350, rose:350 };
-    let canClaim = { bear:false, heart:false, box:false, rose:false };
-    let inviteStats = { total:0, active:0, pending:0 };
-    let bearTaskLevel = 0;
-    let bearTaskCurrent = 0;
+
+    /* ===== كل الحالة تُحفَظ محليًا ===== */
+    const LS = {
+      prefix: 'tgGift_',
+      get(k, def = null) {
+        try {
+          const raw = localStorage.getItem(this.prefix + k);
+          return raw ? JSON.parse(raw) : def;
+        } catch { return def; }
+      },
+      set(k, v) {
+        try {
+          localStorage.setItem(this.prefix + k, JSON.stringify(v));
+        } catch {}
+      }
+    };
+
+    let myGifts         = LS.get('myGifts', { bear:0, heart:0, box:0, rose:0 });
+    let myGiftDates     = LS.get('myGiftDates', { bear:null, heart:null, box:null, rose:null });
+    let adCounters      = LS.get('adCounters', { bear:200, heart:250, box:350, rose:350 });
+    let canClaim        = LS.get('canClaim', { bear:false, heart:false, box:false, rose:false });
+    let inviteStats     = LS.get('inviteStats', { total:0, active:0, pending:0 });
+    let bearTaskLevel   = LS.get('bearTaskLevel', 0);
+    let bearTaskCurrent = LS.get('bearTaskCurrent', 0);
+    let lastClaimDate   = LS.get('lastClaimDate', null);
 
     /*******************************
      * toast helper
@@ -303,9 +321,9 @@
       const usernameElem = document.getElementById('usernameUnderCircle');
       if (tgUser && tgUser.username) {
         usernameElem.textContent = '@' + tgUser.username;
-        localStorage.setItem('fallback_username', tgUser.username);
+        LS.set('fallback_username', tgUser.username);
       } else {
-        const fallback = localStorage.getItem('fallback_username') || "unknown";
+        const fallback = LS.get('fallback_username') || "unknown";
         usernameElem.textContent = '@' + fallback;
       }
     }
@@ -440,6 +458,8 @@
           const required = giftsData[key]?.ads || 200;
           adCounters[key] = Math.max(0, required - watched);
           canClaim[key] = (adCounters[key] === 0);
+          LS.set('adCounters', adCounters);
+          LS.set('canClaim', canClaim);
           renderGiftsRow();
           showToast('Ad views recorded on server. Thank you!', 'success', 2200);
         } else {
@@ -469,17 +489,15 @@
       return Math.round(Math.abs((d2 - d1) / oneDay));
     }
     function nextClaimAllowed() {
-      const lastClaim = localStorage.getItem('lastClaimDate');
-      if (!lastClaim) return true;
-      const last = new Date(lastClaim);
+      if (!lastClaimDate) return true;
+      const last = new Date(lastClaimDate);
       const now = new Date();
       const diff = daysBetween(last, now);
       return diff >= 2;
     }
     function getRemainingTime() {
-      const lastClaim = localStorage.getItem('lastClaimDate');
-      if (!lastClaim) return '';
-      const last = new Date(lastClaim);
+      if (!lastClaimDate) return '';
+      const last = new Date(lastClaimDate);
       const now = new Date();
       const diff = daysBetween(last, now);
       if (diff >= 2) return '';
@@ -520,7 +538,11 @@
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       myGiftDates[gift] = dateStr;
       canClaim[gift] = false; 
-      localStorage.setItem('lastClaimDate', now.toISOString()); 
+      lastClaimDate = now.toISOString();
+      LS.set('myGifts', myGifts);
+      LS.set('myGiftDates', myGiftDates);
+      LS.set('canClaim', canClaim);
+      LS.set('lastClaimDate', lastClaimDate);
       renderGiftsRow();
       showToast(`🎁 Gift ${d.en} claimed successfully!`, 'success');
 
@@ -611,7 +633,7 @@
 
     function getDisplayedUsername(){
       if (tgUser && tgUser.username) return tgUser.username;
-      const local = localStorage.getItem('fallback_username');
+      const local = LS.get('fallback_username');
       return local ? local : 'unknown';
     }
 
@@ -646,6 +668,7 @@
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
         inviteStats.pending = res.data.pending ?? inviteStats.pending;
+        LS.set('inviteStats', inviteStats);
       }
       document.getElementById('totalCount').textContent   = inviteStats.total;
       document.getElementById('activeCount').textContent  = inviteStats.active;
@@ -662,6 +685,7 @@
         inviteStats.total = res.data.total ?? inviteStats.total;
         inviteStats.active = res.data.active ?? inviteStats.active;
         inviteStats.pending = res.data.pending ?? inviteStats.pending;
+        LS.set('inviteStats', inviteStats);
       }
       updateTaskProgress();
       document.getElementById('taskFullPage').style.display = 'flex';
@@ -717,7 +741,12 @@
       myGiftDates.bear = dateStr;
       bearTaskLevel++;
       bearTaskCurrent = 0;
-      localStorage.setItem('lastClaimDate', now.toISOString());
+      lastClaimDate = now.toISOString();
+      LS.set('myGifts', myGifts);
+      LS.set('myGiftDates', myGiftDates);
+      LS.set('bearTaskLevel', bearTaskLevel);
+      LS.set('bearTaskCurrent', bearTaskCurrent);
+      LS.set('lastClaimDate', lastClaimDate);
       showToast('🎁 Bear gift claimed successfully!', 'success');
       updateTaskProgress();
       closeTaskPage();
@@ -735,11 +764,14 @@
           inviteStats.total = res.data.total ?? inviteStats.total;
           inviteStats.active = res.data.active ?? inviteStats.active;
           inviteStats.pending = res.data.pending ?? inviteStats.pending;
+          LS.set('inviteStats', inviteStats);
         } else {
           inviteStats = { total: 0, active: 0, pending: 0 };
+          LS.set('inviteStats', inviteStats);
         }
       } catch(e){
         inviteStats = { total: 0, active: 0, pending: 0 };
+        LS.set('inviteStats', inviteStats);
       }
 
       await loadUserState(); // استرجاع الحالة من السيرفر
@@ -769,20 +801,25 @@
             adCounters[key] = Math.max(0, required - watched);
             if (adCounters[key] === 0) canClaim[key] = true;
           });
+          LS.set('adCounters', adCounters);
+          LS.set('canClaim', canClaim);
         }
         // استرجاع الهدايا التي حصل عليها
         if (res.data.claims) {
           Object.keys(res.data.claims).forEach(key => {
             myGifts[key] = res.data.claims[key];
           });
+          LS.set('myGifts', myGifts);
         }
         // استرجاع تاريخ آخر سحب
         if (res.data.last_claim_date) {
-          localStorage.setItem('lastClaimDate', res.data.last_claim_date);
+          lastClaimDate = res.data.last_claim_date;
+          LS.set('lastClaimDate', lastClaimDate);
         }
         // استرجاع مستوى مهمة الدب
         if (res.data.bear_task_level !== undefined) {
           bearTaskLevel = res.data.bear_task_level;
+          LS.set('bearTaskLevel', bearTaskLevel);
         }
       }
     }
