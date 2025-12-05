@@ -56,24 +56,27 @@ async function upsert(path, body) {
 
 // معالجة الطلبات
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ message: 'Method Not Allowed' });
-
-  const { type, ...body } = req.body;
-
   try {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables');
+      return res.status(500).json({ message: 'Server misconfigured: missing Supabase env vars' });
+    }
+
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Method Not Allowed' });
+
+    const { type, ...body } = req.body;
+
     switch (type) {
 
       // ----------------- Register User -----------------
       case 'register': {
         const { userId, username, firstName, lastName, refal_by, initData } = body;
 
-        // ✅ تحقق من initData
         if (!initData) return res.status(401).json({ message: 'Missing initData' });
 
         const { data: valid } = await rpc('verify_telegram_data', { init_data: initData });
         if (!valid) return res.status(401).json({ message: 'Invalid initData' });
 
-        // سجل المستخدم
         await upsert('gifts', {
           user_id: userId,
           username,
@@ -103,7 +106,6 @@ export default async function handler(req, res) {
         const { userId } = body;
         if (!userId) return res.status(400).json({ message: 'userId required' });
 
-        // آخر claim لكل هدية
         const { data: claims } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.claim&select=gift,updated_at`
@@ -115,7 +117,6 @@ export default async function handler(req, res) {
           });
         }
 
-        // عدد مشاهدات الإعلانات لكل هدية (نجمع الحقل views)
         const { data: adViews } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.ad_view&select=gift,views`
@@ -127,14 +128,12 @@ export default async function handler(req, res) {
           });
         }
 
-        // آخر تاريخ claim عام
         const { data: lastClaim } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.claim&order=updated_at.desc&limit=1&select=updated_at`
         );
         const lastClaimDate = lastClaim && lastClaim[0] ? lastClaim[0].updated_at : null;
 
-        // مستوى مهمة الدب
         const { data: bearTask } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.task_claim&select=count:id`
@@ -155,7 +154,7 @@ export default async function handler(req, res) {
         if (!gift) return res.status(400).json({ message: 'Gift required' });
         if (!userId) return res.status(400).json({ message: 'userId required' });
 
-        // زيادة views لكل إعلان (RPC يتعامل مع upsert أو زيادة الحقل)
+        // نفّذ الـ RPC الذي يُفترض أن يزيد الحقل views
         const up = await rpc('upsert_gift_action', {
           p_user_id: userId,
           p_action: 'ad_view',
@@ -163,13 +162,21 @@ export default async function handler(req, res) {
           p_inc: 1
         });
 
-        if (!up.ok && up.status !== 200 && up.status !== 201) {
-          // لا نكسر الاستجابة في حال RPC أعطى خطأ واضح، نعيد رسالة فشل
-          console.error('upsert_gift_action failed', up);
-          return res.status(500).json({ message: 'Failed to record ad view' });
+        // لو فشل RPC — سجل التفاصيل وأعد الخطأ للعميل لتشخيص أفضل
+        if (!up.ok) {
+          console.error('upsert_gift_action failed', {
+            status: up.status,
+            data: up.data
+          });
+          // أعد رسالة مفصّلة لمطوّر (لا تعرض مفاتيح سرية)
+          return res.status(500).json({
+            message: 'Failed to record ad view',
+            rpc_status: up.status,
+            rpc_response: up.data
+          });
         }
 
-        // الآن اقرأ العدد المجمّع للحقل views لذلك المستخدم+هدية
+        // قراءة العدد المجمّع للحقل views لذلك المستخدم+هدية
         const { data: adRows } = await get(
           'gifts',
           `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
@@ -182,8 +189,7 @@ export default async function handler(req, res) {
           });
         }
 
-        // أرجع عدد المشاهدات لهذا الهدية في الاستجابة حتى يتحقق العميل مباشرة
-        return res.json({ message: 'Ad view recorded', ad_views: { [gift]: views } });
+        return res.status(200).json({ message: 'Ad view recorded', ad_views: { [gift]: views } );
       }
 
       // ----------------- Claim Gift -----------------
@@ -191,7 +197,6 @@ export default async function handler(req, res) {
         const { gift, userId } = body;
         if (!gift) return res.status(400).json({ message: 'Gift required' });
 
-        // تحقق من آخر claim
         const { data: last } = await get(
           'gifts',
           `user_id=eq.${userId}&gift=eq.${gift}&action=eq.claim&order=updated_at.desc&limit=1`
@@ -204,7 +209,6 @@ export default async function handler(req, res) {
           if (diffHours < 48) return res.status(400).json({ message: 'Wait 48h between claims' });
         }
 
-        // جمع عدد الإعلانات من الحقل views
         const { data: adRows } = await get(
           'gifts',
           `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
@@ -220,7 +224,6 @@ export default async function handler(req, res) {
         const required = { bear: 200, heart: 250, box: 350, rose: 350 }[gift] || 200;
         if (views < required) return res.status(400).json({ message: `Need ${required} ad views` });
 
-        // تحقق من الدعوات
         const { data: stats } = await rpc('get_user_invite_stats', { p_user_id: userId });
         if (!stats?.[0]?.active || stats[0].active < 10) return res.status(400).json({ message: 'Need 10 active invites' });
 
@@ -260,7 +263,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ message: 'Unknown type' });
     }
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'Server error' });
+    console.error('Unhandled error in API handler', err);
+    return res.status(500).json({ message: 'Server error', error: String(err) });
   }
 }
