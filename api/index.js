@@ -98,6 +98,57 @@ export default async function handler(req, res) {
         return res.json({ total: row.total, active: row.active, pending: row.pending });
       }
 
+      // ----------------- Get User State -----------------
+      case 'get-user-state': {
+        const { userId } = body;
+        if (!userId) return res.status(400).json({ message: 'userId required' });
+
+        // آخر claim لكل هدية
+        const { data: claims } = await get(
+          'gifts',
+          `user_id=eq.${userId}&action=eq.claim&select=gift,updated_at`
+        );
+        const claimsMap = {};
+        if (claims && claims.length) {
+          claims.forEach(c => {
+            claimsMap[c.gift] = (claimsMap[c.gift] || 0) + 1;
+          });
+        }
+
+        // عدد مشاهدات الإعلانات لكل هدية
+        const { data: adViews } = await get(
+          'gifts',
+          `user_id=eq.${userId}&action=eq.ad_view&select=gift,views`
+        );
+        const adViewsMap = {};
+        if (adViews && adViews.length) {
+          adViews.forEach(r => {
+            adViewsMap[r.gift] = (adViewsMap[r.gift] || 0) + (r.views || 0);
+          });
+        }
+
+        // آخر تاريخ claim عام
+        const { data: lastClaim } = await get(
+          'gifts',
+          `user_id=eq.${userId}&action=eq.claim&order=updated_at.desc&limit=1&select=updated_at`
+        );
+        const lastClaimDate = lastClaim && lastClaim[0] ? lastClaim[0].updated_at : null;
+
+        // مستوى مهمة الدب
+        const { data: bearTask } = await get(
+          'gifts',
+          `user_id=eq.${userId}&action=eq.task_claim&select=count:id`
+        );
+        const bearTaskLevel = bearTask && bearTask[0] ? bearTask[0].count : 0;
+
+        return res.json({
+          claims: claimsMap,
+          ad_views: adViewsMap,
+          last_claim_date: lastClaimDate,
+          bear_task_level: bearTaskLevel
+        });
+      }
+
       // ----------------- Watch Ad -----------------
       case 'watch-ad': {
         const { gift, userId } = body;
