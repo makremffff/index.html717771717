@@ -115,7 +115,7 @@ export default async function handler(req, res) {
           });
         }
 
-        // عدد مشاهدات الإعلان (نجمع قيمة الحقل views لكل هدية)
+        // عدد مشاهدات الإعلانات لكل هدية (نجمع الحقل views)
         const { data: adViews } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.ad_view&select=gift,views`
@@ -153,16 +153,37 @@ export default async function handler(req, res) {
       case 'watch-ad': {
         const { gift, userId } = body;
         if (!gift) return res.status(400).json({ message: 'Gift required' });
+        if (!userId) return res.status(400).json({ message: 'userId required' });
 
-        // زيادة views لكل إعلان
-        await rpc('upsert_gift_action', {
+        // زيادة views لكل إعلان (RPC يتعامل مع upsert أو زيادة الحقل)
+        const up = await rpc('upsert_gift_action', {
           p_user_id: userId,
           p_action: 'ad_view',
           p_gift: gift,
           p_inc: 1
         });
 
-        return res.json({ message: 'Ad view recorded' });
+        if (!up.ok && up.status !== 200 && up.status !== 201) {
+          // لا نكسر الاستجابة في حال RPC أعطى خطأ واضح، نعيد رسالة فشل
+          console.error('upsert_gift_action failed', up);
+          return res.status(500).json({ message: 'Failed to record ad view' });
+        }
+
+        // الآن اقرأ العدد المجمّع للحقل views لذلك المستخدم+هدية
+        const { data: adRows } = await get(
+          'gifts',
+          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
+        );
+
+        let views = 0;
+        if (adRows && adRows.length) {
+          adRows.forEach(r => {
+            views += (r.views || 0);
+          });
+        }
+
+        // أرجع عدد المشاهدات لهذا الهدية في الاستجابة حتى يتحقق العميل مباشرة
+        return res.json({ message: 'Ad view recorded', ad_views: { [gift]: views } });
       }
 
       // ----------------- Claim Gift -----------------
@@ -183,9 +204,7 @@ export default async function handler(req, res) {
           if (diffHours < 48) return res.status(400).json({ message: 'Wait 48h between claims' });
         }
 
-        // تحقق عدد الإعلانات
-        // IMPORTANT: upsert_gift_action يزيد الحقل "views" في صف واحد لكل (user_id,gift,action)
-        // لذلك يجب جمع قيمة الحقل views وليس عد الصفوف.
+        // جمع عدد الإعلانات من الحقل views
         const { data: adRows } = await get(
           'gifts',
           `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
