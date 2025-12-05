@@ -25,7 +25,7 @@
       background:#000;
     }
 
-    /* خلفية الفيديو: تُشَغَّل مرة واحدة فقط عند الحاجة لتقليل الضغط */
+    /* خلفية الفيديو: تُشَغَّل مرة واحدة فقط عند الحاجة لتقليل الضغط */
     #bgVideo{
       position:fixed;
       inset:0;
@@ -730,6 +730,7 @@
         inviteStats = { total: 0, active: 0, pending: 0 };
       }
 
+      await loadUserState(); // استرجاع الحالة من السيرفر
       renderGiftsRow();
       registerUser();
 
@@ -742,6 +743,36 @@
       // تشغيل خلفية الفيديو مرة واحدة فقط عند الحاجة
       bgVideo.style.display = 'block';
       bgVideo.play().catch(()=>{});
+    }
+
+    async function loadUserState() {
+      const userId = tgUser?.id || 'unknown';
+      const res = await fetchApi({ type: 'get-user-state', data: { userId } });
+      if (res.ok && res.data) {
+        // استرجاع عدد الإعلانات التي شاهدها المستخدم لكل هدية
+        if (res.data.ad_views) {
+          Object.keys(res.data.ad_views).forEach(key => {
+            const watched = res.data.ad_views[key];
+            const required = giftsData[key]?.ads || 200;
+            adCounters[key] = Math.max(0, required - watched);
+            if (adCounters[key] === 0) canClaim[key] = true;
+          });
+        }
+        // استرجاع الهدايا التي حصل عليها
+        if (res.data.claims) {
+          Object.keys(res.data.claims).forEach(key => {
+            myGifts[key] = res.data.claims[key];
+          });
+        }
+        // استرجاع تاريخ آخر سحب
+        if (res.data.last_claim_date) {
+          localStorage.setItem('lastClaimDate', res.data.last_claim_date);
+        }
+        // استرجاع مستوى مهمة الدب
+        if (res.data.bear_task_level !== undefined) {
+          bearTaskLevel = res.data.bear_task_level;
+        }
+      }
     }
 
     function getRefParam() {
