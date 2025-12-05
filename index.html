@@ -387,6 +387,8 @@
 
     // منع auto-click وإغلاق زر الاعلان لمدة 2 ثانية بعد الضغط
     const adBtnState = {}; // key -> disabled flag
+
+    // مُحدَّث: الآن نثق برد السيرفر قبل تعديل العداد المحلي
     async function watchAdForGift(key, btnEl) {
       if (!btnEl) btnEl = document.querySelector(`.ad-btn[data-key="${key}"]`);
       if (!btnEl) return;
@@ -403,11 +405,6 @@
         firstOk = await showRewardedAdViaSDK();
         if (!firstOk) {
           showToast('Ad 1 failed or skipped', 'error', 2500);
-          setTimeout(() => {
-            adBtnState[key] = false;
-            btnEl.classList.remove('disabled');
-            btnEl.removeAttribute('aria-disabled');
-          }, 2000);
           return;
         } else {
           showToast('Ad 1 completed', 'success', 1300);
@@ -417,29 +414,39 @@
         secondOk = await showRewardedAdViaSDK();
         if (!secondOk) {
           showToast('Ad 2 failed or skipped', 'error', 2500);
-          setTimeout(() => {
-            adBtnState[key] = false;
-            btnEl.classList.remove('disabled');
-            btnEl.removeAttribute('aria-disabled');
-          }, 2000);
           return;
         } else {
           showToast('Ad 2 completed', 'success', 1300);
         }
 
-        // كلا الإعلانين نجحا -> ننقص العداد بمقدار 1 (محلياً)
-        adCounters[key] = Math.max(0, (adCounters[key] || 1) - 1);
-        if (adCounters[key] === 0) canClaim[key] = true;
-        renderGiftsRow();
-        showToast('Ad views counted. Thank you!', 'success', 2200);
+        // كلا الإعلانين نجحا -> الآن نحاول حفظ المشاهدة على السيرفر أولاً
+        const userId = tgUser?.id ? String(tgUser.id) : null;
+        if (!userId) {
+          showToast('User not initialized. Please reopen the app.', 'error', 3000);
+          return;
+        }
 
-        // إرسال طلب API لحفظ مشاهدة الإعلان في Supabase
-        const userId = tgUser?.id || 'unknown';
-        fetchApi({ type: 'watch-ad', data: { gift: key, userId, initData: tg.initData } }).then(res => {
-            if (!res.ok) {
-                showToast('Warning: Failed to save ad count to server. Try claiming later.', 'error', 3500);
-            }
-        });
+        const res = await fetchApi({ type: 'watch-ad', data: { gift: key, userId } });
+
+        if (!res.ok) {
+          showToast('Failed to save ad count to server. Your view was not counted.', 'error', 3500);
+          return;
+        }
+
+        // إن أعاد السيرفر عدد المشاهدات لليدجت، حدّث العداد المحلي بدقة
+        if (res.data && res.data.ad_views && typeof res.data.ad_views[key] !== 'undefined') {
+          const watched = Number(res.data.ad_views[key] || 0);
+          const required = giftsData[key]?.ads || 200;
+          adCounters[key] = Math.max(0, required - watched);
+          canClaim[key] = (adCounters[key] === 0);
+          renderGiftsRow();
+          showToast('Ad views recorded on server. Thank you!', 'success', 2200);
+        } else {
+          // بدلاً من التغيير المحلي غير المؤكد، نعيد جلب الحالة من السيرفر
+          await loadUserState();
+          renderGiftsRow();
+          showToast('Ad views recorded and state refreshed.', 'success', 2200);
+        }
 
       } finally {
         setTimeout(() => {
@@ -449,7 +456,7 @@
             el.classList.remove('disabled');
             el.removeAttribute('aria-disabled');
           }
-        }, 2000);
+        }, 1200);
       }
     }
 
@@ -494,12 +501,15 @@
 
       const d = giftsData[gift];
       const username = getDisplayedUsername();
-      const userId   = tgUser?.id || 'unknown';
+      const userId   = tgUser?.id ? String(tgUser.id) : null;
+
+      if (!userId) { showToast('User not initialized. Please reopen the app.', 'error'); return; }
 
       const res = await fetchApi({ type: 'claim', data: { gift, userId, username, initData: tg.initData } });
       
       if (!res.ok) {
-        showToast('Claim request failed. Try again later or check console.', 'error');
+        const msg = res.data && res.data.message ? res.data.message : 'Claim request failed. Try again later or check console.';
+        showToast(msg, 'error');
         return;
       }
 
@@ -507,9 +517,7 @@
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
       myGiftDates[gift] = dateStr;
-      // لا يمكن المطالبة بنفس الهدية مجددًا إلا بعد استيفاء الشروط مرة أخرى
       canClaim[gift] = false; 
-      // يتم حفظ تاريخ آخر سحب لمنع السحب المتكرر قبل يومين
       localStorage.setItem('lastClaimDate', now.toISOString()); 
       renderGiftsRow();
       showToast(`🎁 Gift ${d.en} claimed successfully!`, 'success');
