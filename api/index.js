@@ -63,8 +63,8 @@ export default async function handler(req, res) {
       case 'register': {
         const { userId, username, firstName, lastName, refal_by, initData } = body;
         // التحقق من initData
-        const { ok: vok } = await rpc('verify_telegram_data', { init_data: initData });
-        if (!vok) return res.status(401).json({ message: 'Invalid initData' });
+ const { data: valid } = await rpc('verify_telegram_data', { init_data: initData });
+if (!valid) return res.status(401).json({ message: 'Invalid initData' });
 
         await upsert('gifts', {
           user_id: userId,
