@@ -1,6 +1,6 @@
 // api/index.js
 // Supabase REST API (fetch only) – لا يستخدم supabase-js
-// جدول واحد: gifts (register, ad_view, claim, task_claim)
+// جداول: gifts, ad_views, users
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -43,22 +43,10 @@ async function rpc(name, params) {
   return { ok: res.ok, status: res.status, data };
 }
 
-// upsert مع merge duplicates
-async function upsert(path, body) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method: 'POST',
-    headers: { ...headers(), 'Prefer': 'resolution=merge-duplicates' },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json().catch(() => null);
-  return { ok: res.ok, status: res.status, data };
-}
-
-// معالجة الطلبات
+// ----------------- API Handler -----------------
 export default async function handler(req, res) {
   try {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables');
       return res.status(500).json({ message: 'Server misconfigured: missing Supabase env vars' });
     }
 
@@ -70,200 +58,97 @@ export default async function handler(req, res) {
 
       // ----------------- Register User -----------------
       case 'register': {
-        const { userId, username, firstName, lastName, refal_by, initData } = body;
+        const { userId, username, firstName, lastName, refal_by } = body;
+        if (!userId) return res.status(400).json({ message: 'userId required' });
 
-        if (!initData) return res.status(401).json({ message: 'Missing initData' });
-
-        const { data: valid } = await rpc('verify_telegram_data', { init_data: initData });
-        if (!valid) return res.status(401).json({ message: 'Invalid initData' });
-
-        await upsert('gifts', {
-          user_id: userId,
+        await upsert('users', {
+          id: userId,
           username,
           first_name: firstName,
           last_name: lastName,
-          refal_by: refal_by || 0,
-          action: 'register',
-          gift: 'none',
-          views: 0,
-          created_at: new Date().toISOString()
+          ref_by: refal_by || null,
+          created_at: new Date().toISOString(),
+          last_activity: new Date().toISOString()
         });
 
         return res.status(200).json({ message: 'User registered' });
       }
 
-      // ----------------- Invite Stats -----------------
-      case 'invite-stats': {
-        const { userId } = body;
-        const { data } = await rpc('get_user_invite_stats', { p_user_id: userId });
-        if (!data || !data.length) return res.json({ total: 0, active: 0, pending: 0 });
-        const row = data[0];
-        return res.json({ total: row.total, active: row.active, pending: row.pending });
-      }
-
-      // ----------------- Get User State -----------------
-      case 'get-user-state': {
-        const { userId } = body;
-        if (!userId) return res.status(400).json({ message: 'userId required' });
-
-        const { data: claims } = await get(
-          'gifts',
-          `user_id=eq.${userId}&action=eq.claim&select=gift,updated_at`
-        );
-        const claimsMap = {};
-        if (claims && claims.length) {
-          claims.forEach(c => {
-            claimsMap[c.gift] = (claimsMap[c.gift] || 0) + 1;
-          });
-        }
-
-        const { data: adViews } = await get(
-          'gifts',
-          `user_id=eq.${userId}&action=eq.ad_view&select=gift,views`
-        );
-        const adViewsMap = {};
-        if (adViews && adViews.length) {
-          adViews.forEach(r => {
-            adViewsMap[r.gift] = (adViewsMap[r.gift] || 0) + (r.views || 0);
-          });
-        }
-
-        const { data: lastClaim } = await get(
-          'gifts',
-          `user_id=eq.${userId}&action=eq.claim&order=updated_at.desc&limit=1&select=updated_at`
-        );
-        const lastClaimDate = lastClaim && lastClaim[0] ? lastClaim[0].updated_at : null;
-
-        const { data: bearTask } = await get(
-          'gifts',
-          `user_id=eq.${userId}&action=eq.task_claim&select=count:id`
-        );
-        const bearTaskLevel = bearTask && bearTask[0] ? bearTask[0].count : 0;
-
-        return res.json({
-          claims: claimsMap,
-          ad_views: adViewsMap,
-          last_claim_date: lastClaimDate,
-          bear_task_level: bearTaskLevel
-        });
-      }
-
       // ----------------- Watch Ad -----------------
       case 'watch-ad': {
-        const { gift, userId } = body;
-        if (!gift) return res.status(400).json({ message: 'Gift required' });
-        if (!userId) return res.status(400).json({ message: 'userId required' });
+        const { giftId, userId } = body;
+        if (!giftId || !userId) return res.status(400).json({ message: 'giftId and userId required' });
 
-        // نفّذ الـ RPC الذي يُفترض أن يزيد الحقل views
+        // أضف أو زد المشاهدة
         const up = await rpc('upsert_gift_action', {
           p_user_id: userId,
-          p_action: 'ad_view',
-          p_gift: gift,
+          p_gift_id: giftId,
           p_inc: 1
         });
 
-        // لو فشل RPC — سجل التفاصيل وأعد الخطأ للعميل لتشخيص أفضل
         if (!up.ok) {
-          console.error('upsert_gift_action failed', {
-            status: up.status,
-            data: up.data
-          });
-          // أعد رسالة مفصّلة لمطوّر (لا تعرض مفاتيح سرية)
-          return res.status(500).json({
-            message: 'Failed to record ad view',
-            rpc_status: up.status,
-            rpc_response: up.data
-          });
+          console.error('upsert_gift_action failed', up);
+          return res.status(500).json({ message: 'Failed to record ad view', rpc_response: up.data });
         }
 
-        // قراءة العدد المجمّع للحقل views لذلك المستخدم+هدية
+        // جمع كل المشاهدات لذلك المستخدم + الهديه
         const { data: adRows } = await get(
-          'gifts',
-          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
+          'ad_views',
+          `user_id=eq.${userId}&gift_id=eq.${giftId}&select=views`
         );
 
         let views = 0;
         if (adRows && adRows.length) {
-          adRows.forEach(r => {
-            views += (r.views || 0);
-          });
+          adRows.forEach(r => { views += r.views || 0; });
         }
 
-        return res.status(200).json({ message: 'Ad view recorded', ad_views: { [gift]: views } );
+        return res.status(200).json({ message: 'Ad view recorded', ad_views: { [giftId]: views } });
       }
 
       // ----------------- Claim Gift -----------------
       case 'claim': {
-        const { gift, userId } = body;
-        if (!gift) return res.status(400).json({ message: 'Gift required' });
-
-        const { data: last } = await get(
-          'gifts',
-          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.claim&order=updated_at.desc&limit=1`
-        );
-
-        if (last && last.length) {
-          const lastDate = new Date(last[0].updated_at);
-          const now = new Date();
-          const diffHours = (now - lastDate) / (1000 * 60 * 60);
-          if (diffHours < 48) return res.status(400).json({ message: 'Wait 48h between claims' });
-        }
+        const { giftId, userId } = body;
+        if (!giftId || !userId) return res.status(400).json({ message: 'giftId and userId required' });
 
         const { data: adRows } = await get(
-          'gifts',
-          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
+          'ad_views',
+          `user_id=eq.${userId}&gift_id=eq.${giftId}&select=views`
         );
 
         let views = 0;
         if (adRows && adRows.length) {
-          adRows.forEach(r => {
-            views += (r.views || 0);
-          });
+          adRows.forEach(r => { views += r.views || 0; });
         }
 
-        const required = { bear: 200, heart: 250, box: 350, rose: 350 }[gift] || 200;
-        if (views < required) return res.status(400).json({ message: `Need ${required} ad views` });
-
-        const { data: stats } = await rpc('get_user_invite_stats', { p_user_id: userId });
-        if (!stats?.[0]?.active || stats[0].active < 10) return res.status(400).json({ message: 'Need 10 active invites' });
+        const giftReqViews = { 1: 200, 2: 250, 3: 350 }[giftId] || 200;
+        if (views < giftReqViews) return res.status(400).json({ message: `Need ${giftReqViews} ad views` });
 
         await rpc('upsert_gift_action', {
           p_user_id: userId,
-          p_action: 'claim',
-          p_gift: gift,
+          p_gift_id: giftId,
           p_inc: 1
         });
 
-        return res.json({ message: 'Claimed' });
-      }
-
-      // ----------------- Claim Task -----------------
-      case 'claim-task': {
-        const { task, userId } = body;
-        if (!task) return res.status(400).json({ message: 'Task required' });
-
-        if (task === 'bear') {
-          const { data: stats } = await rpc('get_user_invite_stats', { p_user_id: userId });
-          if (!stats?.[0]?.active || stats[0].active < 10) return res.status(400).json({ message: 'Need 10 active invites' });
-
-          await rpc('upsert_gift_action', {
-            p_user_id: userId,
-            p_action: 'task_claim',
-            p_gift: 'bear',
-            p_inc: 1
-          });
-
-          return res.json({ message: 'Task reward claimed' });
-        }
-
-        return res.status(400).json({ message: 'Unknown task' });
+        return res.status(200).json({ message: 'Gift claimed' });
       }
 
       default:
         return res.status(400).json({ message: 'Unknown type' });
     }
+
   } catch (err) {
-    console.error('Unhandled error in API handler', err);
+    console.error('Unhandled error', err);
     return res.status(500).json({ message: 'Server error', error: String(err) });
   }
+}
+
+// ----------------- Upsert Helper -----------------
+async function upsert(path, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method: 'POST',
+    headers: { ...headers(), 'Prefer': 'resolution=merge-duplicates' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, data };
 }
