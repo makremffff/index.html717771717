@@ -115,7 +115,7 @@ export default async function handler(req, res) {
           });
         }
 
-        // عدد مشاهدات الإعلانات لكل هدية
+        // عدد مشاهدات الإعلان (نجمع قيمة الحقل views لكل هدية)
         const { data: adViews } = await get(
           'gifts',
           `user_id=eq.${userId}&action=eq.ad_view&select=gift,views`
@@ -184,12 +184,20 @@ export default async function handler(req, res) {
         }
 
         // تحقق عدد الإعلانات
-        const { data: countRow } = await get(
+        // IMPORTANT: upsert_gift_action يزيد الحقل "views" في صف واحد لكل (user_id,gift,action)
+        // لذلك يجب جمع قيمة الحقل views وليس عد الصفوف.
+        const { data: adRows } = await get(
           'gifts',
-          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=count:id`
+          `user_id=eq.${userId}&gift=eq.${gift}&action=eq.ad_view&select=views`
         );
 
-        const views = countRow?.[0]?.count || 0;
+        let views = 0;
+        if (adRows && adRows.length) {
+          adRows.forEach(r => {
+            views += (r.views || 0);
+          });
+        }
+
         const required = { bear: 200, heart: 250, box: 350, rose: 350 }[gift] || 200;
         if (views < required) return res.status(400).json({ message: `Need ${required} ad views` });
 
