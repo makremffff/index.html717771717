@@ -81,7 +81,7 @@
     .task-progress-card{background:#222237;padding:20px;border-radius:12px;box-shadow:2px 2px 14px #0004;display:flex;align-items:center;gap:12px;justify-content:center}
     .task-progress-card img{width:20px;height:20px;object-fit:cover;border-radius:4px}
     .task-progress-card span{font-family:monospace;font-size:16px;color:#fff}
-    .task-progress-bar{width:100%;height:8px;background:#111;border-radius:4px;overflow:hidden;margin-top:10px}
+    .task-progress-bar{width:100%;Height:8px;background:#111;border-radius:4px;overflow:hidden;margin-top:10px}
     .task-progress-bar-inner{height:100%;background:linear-gradient(90deg,#ffe161,#ffd700);border-radius:4px;transition:width .3s ease}
     .task-claim-btn{background:linear-gradient(90deg,#ffe161,#ffd700);border:1px solid #cead23;color:#222;font-weight:bold;font-family:monospace;padding:8px 24px;font-size:16px;border-radius:10px;margin-top:12px;cursor:pointer;animation:pulse 1s infinite alternate;box-shadow:0 0 8px #fff3;transition:.15s}
     .channel-task-card{background:#222237;padding:20px;border-radius:12px;box-shadow:2px 2px 14px #0004;display:flex;align-items:center;gap:12px;justify-content:center;margin-top:12px}
@@ -426,7 +426,8 @@
           return;
         }
 
-        const res = await fetchApi({ type: 'watch-ad', data: { gift: key, userId } });
+        // IMPORTANT: server expects giftId and userId (not "gift")
+        const res = await fetchApi({ type: 'watch-ad', data: { giftId: key, userId } });
 
         if (!res.ok) {
           showToast('Failed to save ad count to server. Your view was not counted.', 'error', 3500);
@@ -505,7 +506,8 @@
 
       if (!userId) { showToast('User not initialized. Please reopen the app.', 'error'); return; }
 
-      const res = await fetchApi({ type: 'claim', data: { gift, userId, username, initData: tg.initData } });
+      // IMPORTANT: server expects giftId and userId exactly
+      const res = await fetchApi({ type: 'claim', data: { giftId: gift, userId } });
       
       if (!res.ok) {
         const msg = res.data && res.data.message ? res.data.message : 'Claim request failed. Try again later or check console.';
@@ -703,7 +705,9 @@
 
       const userId = tgUser?.id || 'unknown';
       const username = getDisplayedUsername();
-      const res = await fetchApi({ type: 'claim-task', data: { task: 'bear', userId, username, initData: tg.initData } });
+
+      // IMPORTANT: server expects taskId and userId (not "task")
+      const res = await fetchApi({ type: 'claim-task', data: { taskId: 'bear', userId } });
       
       if (!res.ok) { showToast('Claim task failed. Try again later.', 'error'); return; }
 
